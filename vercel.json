@@ -1,7 +1,5 @@
 {
   "buildCommand": "bun run build",
-  "outputDirectory": ".output/public",
   "installCommand": "bun install",
-  "framework": null,
-  "regions": ["iad1"]
+  "framework": null
 }
