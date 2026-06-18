@@ -1,224 +1,372 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { useState } from "react";
+import { createServerFn } from "@tanstack/react-start";
+import { useServerFn } from "@tanstack/react-start";
+import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Check, Loader2, Sparkles, Zap, Bot, Phone, MessageCircle, Mail } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import {
+  User, Briefcase, Zap, Bot, Sparkles, Check,
+  ChevronRight, ChevronLeft, Loader2, GraduationCap,
+} from "lucide-react";
 import { toast } from "sonner";
+
+// ─── Server function ──────────────────────────────────────────────────────────
+
+const saveProfile = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: {
+    full_name: string;
+    target_title: string;
+    experience_level: string;
+    current_tier: string;
+    search_urgency: string;
+  }) => d)
+  .handler(async ({ data, context }) => {
+    const { error } = await context.supabase
+      .from("profiles")
+      .upsert({ id: context.userId, ...data })
+      .eq("id", context.userId);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
 
 export const Route = createFileRoute("/_authenticated/onboarding")({
   component: Onboarding,
 });
 
+// ─── Tier definitions ─────────────────────────────────────────────────────────
+
 const TIERS = [
-  { id: "freemium", name: "Freemium", price: "$0", icon: Sparkles, perks: ["CV Builder", "1 AI Tailor / day", "Manual job search"] },
-  { id: "paid", name: "Paid", price: "$19/mo", icon: Zap, perks: ["Unlimited AI Tailor", "24/7 Job Scanner", "Email + Telegram alerts"] },
-  { id: "premium", name: "Premium Agent", price: "$49/mo", icon: Bot, perks: ["All Paid features", "Autonomous Agent", "Auto-apply to matched jobs"] },
+  {
+    id: "free",
+    label: "Freemium",
+    price: "$0",
+    icon: Sparkles,
+    color: "border-border",
+    badge: null,
+    perks: ["5 AI CV tailors/month", "1 CV stored", "AI CV parser", "Manual job search"],
+  },
+  {
+    id: "pro",
+    label: "Pro",
+    price: "$19/mo",
+    icon: Zap,
+    color: "border-primary",
+    badge: "Most Popular",
+    perks: ["Unlimited AI tailors", "10 CVs", "24/7 Job Scanner", "50 auto-applications/mo", "Telegram alerts"],
+  },
+  {
+    id: "scale",
+    label: "Premium Agent",
+    price: "$49/mo",
+    icon: Bot,
+    color: "border-[oklch(0.70_0.20_295)]",
+    badge: "Full Autonomy",
+    perks: ["Everything in Pro", "Unlimited applications", "Priority AI queue", "WhatsApp + Telegram", "Dedicated support"],
+  },
 ];
 
-function Onboarding() {
-  const navigate = useNavigate();
-  const [step, setStep] = useState(1);
-  const [fullName, setFullName] = useState("");
-  const [targetTitle, setTargetTitle] = useState("");
-  const [experience, setExperience] = useState("");
-  const [tier, setTier] = useState("freemium");
-  const [phoneNumber, setPhoneNumber] = useState("");
-  const [telegramHandle, setTelegramHandle] = useState("");
-  const [notifPref, setNotifPref] = useState<"email" | "telegram" | "whatsapp">("email");
-  const [saving, setSaving] = useState(false);
+const EXPERIENCE_LEVELS = [
+  { id: "entry", label: "Entry Level", sub: "0–2 years" },
+  { id: "mid", label: "Mid Level", sub: "2–5 years" },
+  { id: "senior", label: "Senior", sub: "5–10 years" },
+  { id: "lead", label: "Lead / Principal", sub: "8+ years" },
+  { id: "executive", label: "Executive", sub: "Director, VP, C-Suite" },
+];
 
-  useEffect(() => {
-    (async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      const { data } = await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle();
-      if (data) {
-        setFullName(data.full_name ?? "");
-        if (data.onboarded) navigate({ to: "/dashboard" });
-      }
-    })();
-  }, [navigate]);
+const URGENCY_OPTIONS = [
+  { id: "active", label: "Actively Applying", sub: "Looking for something new now" },
+  { id: "open", label: "Open to Opportunities", sub: "Not urgent, but interested" },
+  { id: "exploring", label: "Just Exploring", sub: "Researching the market" },
+];
 
-  const next = () => setStep((s) => Math.min(4, s + 1));
-  const back = () => setStep((s) => Math.max(1, s - 1));
+// ─── Step indicator ───────────────────────────────────────────────────────────
 
-  const finish = async () => {
-    setSaving(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setSaving(false); return; }
-    // NOTE: current_tier is intentionally NOT written from the client.
-    // Tier changes are server-controlled and require a verified payment;
-    // a database trigger blocks client writes to current_tier.
-    const { error } = await supabase.from("profiles").update({
-      full_name: fullName,
-      target_title: targetTitle,
-      experience_level: experience,
-      phone_number: phoneNumber || null,
-      telegram_handle: telegramHandle || null,
-      notification_preference: notifPref,
-      onboarded: true,
-    }).eq("id", user.id);
-    setSaving(false);
-    if (error) return toast.error(error.message);
-    toast.success("You're all set!");
-    navigate({ to: "/dashboard" });
-  };
+const STEPS = ["Your Details", "Experience", "Search Goal", "Choose Plan"];
 
+function StepIndicator({ current }: { current: number }) {
   return (
-    <div className="mx-auto flex min-h-screen max-w-2xl flex-col justify-center p-6">
-      <div className="mb-6 flex items-center gap-2">
-        {[1, 2, 3, 4].map((s) => (
-          <div key={s} className={`h-1.5 flex-1 rounded-full ${s <= step ? "bg-gradient-to-r from-primary to-[oklch(0.70_0.20_295)]" : "bg-muted"}`} />
-        ))}
-      </div>
-
-      <Card className="glass-strong border-border p-8">
-        {step === 1 && (
-          <>
-            <h1 className="text-2xl font-semibold">Tell us about you</h1>
-            <p className="mt-1 text-sm text-muted-foreground">We'll personalize your dashboard and job matches.</p>
-            <div className="mt-6 space-y-4">
-              <div><Label>Full name</Label><Input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Ada Lovelace" className="mt-1.5" /></div>
-              <div><Label>Target job title</Label><Input value={targetTitle} onChange={(e) => setTargetTitle(e.target.value)} placeholder="Senior Product Designer" className="mt-1.5" /></div>
-              <div>
-                <Label>Experience level</Label>
-                <Select value={experience} onValueChange={setExperience}>
-                  <SelectTrigger className="mt-1.5"><SelectValue placeholder="Select your experience" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="entry">Entry (0–2 yrs)</SelectItem>
-                    <SelectItem value="mid">Mid (3–5 yrs)</SelectItem>
-                    <SelectItem value="senior">Senior (6–9 yrs)</SelectItem>
-                    <SelectItem value="lead">Lead / Staff (10+ yrs)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+    <div className="mb-8 flex items-center justify-center gap-0">
+      {STEPS.map((label, i) => (
+        <div key={label} className="flex items-center">
+          <div className="flex flex-col items-center gap-1">
+            <div className={`grid h-8 w-8 place-items-center rounded-full text-xs font-semibold transition-all ${
+              i < current
+                ? "bg-[oklch(0.72_0.18_155)] text-white"
+                : i === current
+                  ? "bg-gradient-to-br from-primary to-[oklch(0.70_0.20_295)] text-primary-foreground"
+                  : "bg-muted text-muted-foreground"
+            }`}>
+              {i < current ? <Check className="h-4 w-4" /> : i + 1}
             </div>
-          </>
-        )}
-
-        {step === 2 && (
-          <>
-            <h1 className="text-2xl font-semibold">Choose your tier</h1>
-            <p className="mt-1 text-sm text-muted-foreground">You can upgrade anytime.</p>
-            <div className="mt-6 grid gap-3">
-              {TIERS.map((t) => {
-                const Icon = t.icon;
-                const active = tier === t.id;
-                return (
-                  <button key={t.id} type="button" onClick={() => setTier(t.id)}
-                    className={`group rounded-xl border p-4 text-left transition ${active ? "border-primary bg-primary/10 glow" : "border-border hover:bg-card/80"}`}>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className={`grid h-9 w-9 place-items-center rounded-lg ${active ? "bg-gradient-to-br from-primary to-[oklch(0.70_0.20_295)] text-primary-foreground" : "bg-muted"}`}><Icon className="h-4 w-4" /></div>
-                        <div>
-                          <div className="font-medium">{t.name}</div>
-                          <div className="text-xs text-muted-foreground">{t.perks.join(" • ")}</div>
-                        </div>
-                      </div>
-                      <div className="text-sm font-semibold">{t.price}</div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </>
-        )}
-
-        {step === 3 && (
-          <>
-            <h1 className="text-2xl font-semibold">How should we reach you?</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Job alerts and agent updates are delivered via your preferred channel.
-              Telegram and WhatsApp are optional but recommended for real-time notifications.
-            </p>
-            <div className="mt-6 space-y-4">
-              <div>
-                <Label className="flex items-center gap-1.5"><Phone className="h-3.5 w-3.5" /> Phone number (for WhatsApp)</Label>
-                <Input
-                  type="tel"
-                  value={phoneNumber}
-                  onChange={(e) => setPhoneNumber(e.target.value)}
-                  placeholder="+1 555 123 4567"
-                  className="mt-1.5"
-                  maxLength={20}
-                />
-                <p className="mt-1 text-xs text-muted-foreground">Include country code. Used only for WhatsApp alerts.</p>
-              </div>
-              <div>
-                <Label className="flex items-center gap-1.5"><MessageCircle className="h-3.5 w-3.5" /> Telegram handle</Label>
-                <Input
-                  value={telegramHandle}
-                  onChange={(e) => setTelegramHandle(e.target.value.replace(/^@/, ""))}
-                  placeholder="your_username"
-                  className="mt-1.5"
-                  maxLength={32}
-                />
-                <p className="mt-1 text-xs text-muted-foreground">Without the @. Start a chat with our bot to receive alerts.</p>
-              </div>
-              <div>
-                <Label>Preferred channel</Label>
-                <div className="mt-1.5 grid grid-cols-3 gap-2">
-                  {([
-                    { id: "email", label: "Email", icon: Mail },
-                    { id: "telegram", label: "Telegram", icon: MessageCircle },
-                    { id: "whatsapp", label: "WhatsApp", icon: Phone },
-                  ] as const).map(({ id, label, icon: Icon }) => {
-                    const active = notifPref === id;
-                    return (
-                      <button
-                        key={id}
-                        type="button"
-                        onClick={() => setNotifPref(id)}
-                        className={`flex items-center justify-center gap-1.5 rounded-lg border p-2.5 text-sm transition ${
-                          active ? "border-primary bg-primary/10 text-foreground glow" : "border-border text-muted-foreground hover:bg-card/80"
-                        }`}
-                      >
-                        <Icon className="h-3.5 w-3.5" />
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          </>
-        )}
-
-        {step === 4 && (
-          <>
-            <h1 className="text-2xl font-semibold">Ready to launch</h1>
-            <p className="mt-1 text-sm text-muted-foreground">Review and confirm.</p>
-            <ul className="mt-6 space-y-2 text-sm">
-              <Row label="Name" value={fullName || "—"} />
-              <Row label="Target role" value={targetTitle || "—"} />
-              <Row label="Experience" value={experience || "—"} />
-              <Row label="Tier" value={TIERS.find((t) => t.id === tier)?.name ?? tier} />
-              <Row label="Phone" value={phoneNumber || "—"} />
-              <Row label="Telegram" value={telegramHandle ? `@${telegramHandle}` : "—"} />
-              <Row label="Notifications via" value={notifPref} />
-            </ul>
-          </>
-        )}
-
-        <div className="mt-8 flex justify-between">
-          <Button variant="ghost" onClick={back} disabled={step === 1}>Back</Button>
-          {step < 4 ? (
-            <Button onClick={next} disabled={step === 1 && (!fullName || !targetTitle || !experience)} className="bg-gradient-to-r from-primary to-[oklch(0.70_0.20_295)] text-primary-foreground border-0">Continue</Button>
-          ) : (
-            <Button onClick={finish} disabled={saving} className="bg-gradient-to-r from-primary to-[oklch(0.70_0.20_295)] text-primary-foreground border-0">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Check className="mr-2 h-4 w-4" /> Launch dashboard</>}
-            </Button>
+            <span className={`hidden text-[10px] sm:block ${i === current ? "text-foreground font-medium" : "text-muted-foreground"}`}>
+              {label}
+            </span>
+          </div>
+          {i < STEPS.length - 1 && (
+            <div className={`mx-2 mb-4 h-px w-8 sm:w-12 ${i < current ? "bg-[oklch(0.72_0.18_155)]" : "bg-border"}`} />
           )}
         </div>
-      </Card>
+      ))}
     </div>
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
-  return <li className="flex justify-between border-b border-border py-2"><span className="text-muted-foreground">{label}</span><span className="font-medium">{value}</span></li>;
+// ─── Main component ───────────────────────────────────────────────────────────
+
+function Onboarding() {
+  const navigate = useNavigate();
+  const saveFn = useServerFn(saveProfile);
+
+  const [step, setStep] = useState(0);
+  const [saving, setSaving] = useState(false);
+
+  const [fullName, setFullName] = useState("");
+  const [targetTitle, setTargetTitle] = useState("");
+  const [experienceLevel, setExperienceLevel] = useState("");
+  const [searchUrgency, setSearchUrgency] = useState("");
+  const [tier, setTier] = useState("free");
+
+  const next = () => setStep((s) => Math.min(s + 1, STEPS.length - 1));
+  const back = () => setStep((s) => Math.max(s - 1, 0));
+
+  const finish = async () => {
+    if (!fullName.trim()) return toast.error("Please enter your name");
+    setSaving(true);
+    try {
+      await saveFn({
+        data: {
+          full_name: fullName,
+          target_title: targetTitle,
+          experience_level: experienceLevel,
+          current_tier: tier,
+          search_urgency: searchUrgency,
+        },
+      });
+      toast.success("Profile saved — welcome to VentureApply!");
+      navigate({ to: "/dashboard" });
+    } catch (e: any) {
+      toast.error(e.message ?? "Failed to save profile");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center px-4 py-12">
+      {/* Logo */}
+      <div className="mb-8 flex items-center gap-2">
+        <div className="grid h-9 w-9 place-items-center rounded-lg bg-gradient-to-br from-primary to-[oklch(0.70_0.20_295)] glow">
+          <Zap className="h-5 w-5 text-primary-foreground" />
+        </div>
+        <span className="text-xl font-semibold tracking-tight">VentureApply</span>
+      </div>
+
+      <div className="w-full max-w-2xl">
+        <StepIndicator current={step} />
+
+        <Card className="glass border-border p-8">
+          {/* ── Step 0: Details ── */}
+          {step === 0 && (
+            <div className="space-y-5">
+              <div>
+                <h2 className="text-xl font-bold">Welcome — let's set up your profile</h2>
+                <p className="mt-1 text-sm text-muted-foreground">This helps our AI tailor your applications more accurately.</p>
+              </div>
+              <div className="space-y-1">
+                <Label>Full name</Label>
+                <div className="relative">
+                  <User className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    className="pl-9"
+                    placeholder="Betel Asfaw"
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <Label>Target job title(s)</Label>
+                <div className="relative">
+                  <Briefcase className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    className="pl-9"
+                    placeholder="e.g. Frontend Engineer, Product Manager"
+                    value={targetTitle}
+                    onChange={(e) => setTargetTitle(e.target.value)}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">Separate multiple titles with a comma.</p>
+              </div>
+            </div>
+          )}
+
+          {/* ── Step 1: Experience ── */}
+          {step === 1 && (
+            <div className="space-y-5">
+              <div>
+                <h2 className="text-xl font-bold">What's your experience level?</h2>
+                <p className="mt-1 text-sm text-muted-foreground">This calibrates the language and tone of your tailored CVs.</p>
+              </div>
+              <div className="grid gap-2">
+                {EXPERIENCE_LEVELS.map((lvl) => (
+                  <button
+                    key={lvl.id}
+                    onClick={() => setExperienceLevel(lvl.id)}
+                    className={`flex items-center justify-between rounded-xl border px-4 py-3 text-left transition-all hover:border-primary/50 ${
+                      experienceLevel === lvl.id
+                        ? "border-primary bg-primary/10"
+                        : "border-border bg-card/40"
+                    }`}
+                  >
+                    <div>
+                      <div className="text-sm font-medium">{lvl.label}</div>
+                      <div className="text-xs text-muted-foreground">{lvl.sub}</div>
+                    </div>
+                    {experienceLevel === lvl.id && (
+                      <div className="grid h-5 w-5 place-items-center rounded-full bg-primary">
+                        <Check className="h-3 w-3 text-primary-foreground" />
+                      </div>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── Step 2: Search goal ── */}
+          {step === 2 && (
+            <div className="space-y-5">
+              <div>
+                <h2 className="text-xl font-bold">How urgently are you looking?</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  This feeds the autonomous agent's matching criteria — active seekers get higher scan frequency.
+                </p>
+              </div>
+              <div className="grid gap-2">
+                {URGENCY_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.id}
+                    onClick={() => setSearchUrgency(opt.id)}
+                    className={`flex items-center justify-between rounded-xl border px-4 py-3 text-left transition-all hover:border-primary/50 ${
+                      searchUrgency === opt.id
+                        ? "border-primary bg-primary/10"
+                        : "border-border bg-card/40"
+                    }`}
+                  >
+                    <div>
+                      <div className="text-sm font-medium">{opt.label}</div>
+                      <div className="text-xs text-muted-foreground">{opt.sub}</div>
+                    </div>
+                    {searchUrgency === opt.id && (
+                      <div className="grid h-5 w-5 place-items-center rounded-full bg-primary">
+                        <Check className="h-3 w-3 text-primary-foreground" />
+                      </div>
+                    )}
+                  </button>
+                ))}
+              </div>
+              <p className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                💡 You can change this at any time from your profile settings.
+              </p>
+            </div>
+          )}
+
+          {/* ── Step 3: Tier ── */}
+          {step === 3 && (
+            <div className="space-y-5">
+              <div>
+                <h2 className="text-xl font-bold">Choose your plan</h2>
+                <p className="mt-1 text-sm text-muted-foreground">Start free — upgrade anytime. No credit card required for free tier.</p>
+              </div>
+              <div className="grid gap-3">
+                {TIERS.map((t) => {
+                  const Icon = t.icon;
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => setTier(t.id)}
+                      className={`relative rounded-xl border p-4 text-left transition-all ${
+                        tier === t.id
+                          ? `${t.color} bg-primary/5 shadow-sm`
+                          : "border-border bg-card/40 hover:border-primary/40"
+                      }`}
+                    >
+                      {t.badge && (
+                        <Badge className="absolute right-3 top-3 bg-gradient-to-r from-primary to-[oklch(0.70_0.20_295)] text-primary-foreground border-0 text-[10px]">
+                          {t.badge}
+                        </Badge>
+                      )}
+                      <div className="flex items-start gap-3">
+                        <div className={`mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg ${
+                          tier === t.id
+                            ? "bg-gradient-to-br from-primary to-[oklch(0.70_0.20_295)] text-primary-foreground"
+                            : "bg-muted text-muted-foreground"
+                        }`}>
+                          <Icon className="h-4 w-4" />
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-baseline gap-2">
+                            <span className="font-semibold">{t.label}</span>
+                            <span className="text-sm text-muted-foreground">{t.price}</span>
+                          </div>
+                          <ul className="mt-1.5 space-y-0.5">
+                            {t.perks.map((p) => (
+                              <li key={p} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                <Check className="h-3 w-3 shrink-0 text-[oklch(0.72_0.18_155)]" /> {p}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                        {tier === t.id && (
+                          <div className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-primary">
+                            <Check className="h-3 w-3 text-primary-foreground" />
+                          </div>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* ── Navigation ── */}
+          <div className="mt-8 flex justify-between">
+            <Button variant="outline" onClick={back} disabled={step === 0}>
+              <ChevronLeft className="mr-1 h-4 w-4" /> Back
+            </Button>
+
+            {step < STEPS.length - 1 ? (
+              <Button
+                onClick={next}
+                disabled={step === 0 && !fullName.trim()}
+                className="bg-gradient-to-r from-primary to-[oklch(0.70_0.20_295)] text-primary-foreground border-0 glow"
+              >
+                Continue <ChevronRight className="ml-1 h-4 w-4" />
+              </Button>
+            ) : (
+              <Button
+                onClick={finish}
+                disabled={saving}
+                className="bg-gradient-to-r from-primary to-[oklch(0.70_0.20_295)] text-primary-foreground border-0 glow"
+              >
+                {saving
+                  ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Saving…</>
+                  : <><Zap className="mr-2 h-4 w-4" /> Launch VentureApply</>}
+              </Button>
+            )}
+          </div>
+        </Card>
+
+        <p className="mt-4 text-center text-xs text-muted-foreground">
+          You can update all of these from your profile settings at any time.
+        </p>
+      </div>
+    </div>
+  );
 }
