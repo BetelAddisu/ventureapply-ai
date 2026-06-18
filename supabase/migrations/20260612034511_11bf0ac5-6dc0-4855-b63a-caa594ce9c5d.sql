@@ -1,0 +1,1 @@
+REVOKE EXECUTE ON FUNCTION public.prevent_client_tier_change() FROM PUBLIC, anon, authenticated;

@@ -1,0 +1,1 @@
+ALTER TABLE public.cvs ADD CONSTRAINT cvs_user_id_title_key UNIQUE (user_id, title);
