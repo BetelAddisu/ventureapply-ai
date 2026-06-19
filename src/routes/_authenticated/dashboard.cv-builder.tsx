@@ -16,6 +16,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { parseCV, listCVs } from "@/lib/cv.functions";
+import * as pdfjsLib from "pdfjs-dist";
+import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 export const Route = createFileRoute("/_authenticated/dashboard/cv-builder")({
   component: CVBuilder,
@@ -97,10 +99,8 @@ function CVBuilder() {
         toast.success("Text extracted — review and click Parse");
       } else if (file.type === "application/pdf" || file.name.endsWith(".pdf")) {
         // PDF: use pdfjs-dist (loaded dynamically to keep bundle lean)
-        const pdfjsLib = await import("pdfjs-dist");
-
-        // Use the legacy build worker via CDN — avoids bundler worker issues
-        pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+        // Use the local worker processed by Vite
+        pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
         const arrayBuffer = await file.arrayBuffer();
         const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
