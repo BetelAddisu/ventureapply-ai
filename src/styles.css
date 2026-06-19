@@ -192,3 +192,74 @@
 @utility glow {
   box-shadow: var(--shadow-glow);
 }
+
+/* ── CV Export / Print styles ───────────────────────────────────────────────
+   When window.print() is called from the CV Builder, we hide all UI chrome
+   and render only the #cv-preview panel full-width on white paper.
+   ─────────────────────────────────────────────────────────────────────────── */
+@media print {
+  /* Hide everything by default */
+  body * {
+    visibility: hidden !important;
+  }
+
+  /* Show only the preview card and its children */
+  #cv-preview,
+  #cv-preview * {
+    visibility: visible !important;
+  }
+
+  /* Hide the toolbar row inside the preview (Export & Tailor buttons) */
+  #cv-preview .no-print {
+    display: none !important;
+  }
+
+  /* Position the preview to fill the whole page */
+  #cv-preview {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100vw !important;
+    height: auto !important;
+    overflow: visible !important;
+
+    /* Reset glass / dark-mode styles for clean white paper */
+    background: #ffffff !important;
+    backdrop-filter: none !important;
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+
+    /* Comfortable print margins */
+    padding: 2cm 2.5cm !important;
+  }
+
+  /* Force text to black for print */
+  #cv-preview h1,
+  #cv-preview h2,
+  #cv-preview p,
+  #cv-preview span,
+  #cv-preview div {
+    color: #111111 !important;
+  }
+
+  /* Skills badges: simple border instead of glassmorphism */
+  #cv-preview span.rounded-md {
+    border: 1px solid #cccccc !important;
+    background: transparent !important;
+  }
+
+  /* Section dividers */
+  #cv-preview h2 {
+    border-bottom-color: #333333 !important;
+  }
+
+  /* Remove page breaks mid-section */
+  #cv-preview section {
+    page-break-inside: avoid;
+  }
+
+  @page {
+    margin: 1.5cm;
+    size: A4 portrait;
+  }
+}

@@ -26,9 +26,10 @@ const saveProfile = createServerFn({ method: "POST" })
     search_urgency: string;
   }) => d)
   .handler(async ({ data, context }) => {
+    const { full_name, target_title, experience_level, current_tier } = data;
     const { error } = await context.supabase
       .from("profiles")
-      .upsert({ id: context.userId, ...data })
+      .upsert({ id: context.userId, full_name, target_title, experience_level, current_tier })
       .eq("id", context.userId);
     if (error) throw new Error(error.message);
     return { ok: true };

@@ -2,18 +2,25 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { queryOptions, useSuspenseQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { createServerFn } from "@tanstack/react-start";
+import { useState } from "react";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from "@/components/ui/dialog";
+import {
   Activity, Mail, MessageCircle, Phone, Search, ExternalLink, Bot,
-  Building2, MapPin, Calendar, Sparkles, TrendingUp,
+  Building2, MapPin, Calendar, Sparkles, TrendingUp, Link2, Loader2,
+  Send, CheckCircle2,
 } from "lucide-react";
 import { toast } from "sonner";
+import { scrapeJob, autoApply } from "@/lib/jobs.functions";
 
 // ─── Server functions ──────────────────────────────────────────────────────────
 
@@ -22,12 +29,12 @@ const listScrapedJobs = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const { data, error } = await context.supabase
       .from("scraped_jobs")
-      // Using Lovable's actual column names: title, description (not job_title, job_description)
-      .select("id, title, company, location, url, salary_range, created_at, status")
+      // Real column names from schema: job_title, job_description (not title/description)
+      .select("id, job_title, company, url, salary_range, created_at")
       .order("created_at", { ascending: false })
       .limit(50);
     if (error) throw new Error(error.message);
-    return data ?? [];
+    return (data ?? []) as unknown as ScrapedJob[];
   });
 
 const listJobMatches = createServerFn({ method: "GET" })
@@ -37,27 +44,41 @@ const listJobMatches = createServerFn({ method: "GET" })
       .from("job_matches")
       .select(`
         id, match_score, tailor_suggestions, status, created_at,
-        scraped_jobs ( id, title, company, location, url, salary_range )
+        scraped_jobs ( id, job_title, company, url, salary_range )
       `)
       .eq("user_id", context.userId)
       .order("match_score", { ascending: false })
       .limit(50);
     if (error) throw new Error(error.message);
-    return data ?? [];
+    return (data ?? []) as unknown as JobMatch[];
   });
 
+const listUserCVs = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { data } = await context.supabase
+      .from("cvs")
+      .select("id, title")
+      .eq("user_id", context.userId)
+      .order("updated_at", { ascending: false });
+    return (data ?? []) as CVOption[];
+  });
+
+// Profiles uses a single `notification_preference` text column, not separate booleans.
+// We store email/telegram/whatsapp as a comma-separated string.
 const getNotifPrefs = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const { data } = await context.supabase
       .from("profiles")
-      .select("notify_email, notify_telegram, notify_whatsapp")
+      .select("notification_preference")
       .eq("id", context.userId)
       .maybeSingle();
+    const pref = data?.notification_preference ?? "email";
     return {
-      email: data?.notify_email ?? true,
-      telegram: data?.notify_telegram ?? false,
-      whatsapp: data?.notify_whatsapp ?? false,
+      email:    pref.includes("email"),
+      telegram: pref.includes("telegram"),
+      whatsapp: pref.includes("whatsapp"),
     };
   });
 
@@ -65,24 +86,30 @@ const setNotifPrefs = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: { email: boolean; telegram: boolean; whatsapp: boolean }) => d)
   .handler(async ({ data, context }) => {
+    const channels: string[] = [];
+    if (data.email)    channels.push("email");
+    if (data.telegram) channels.push("telegram");
+    if (data.whatsapp) channels.push("whatsapp");
     const { error } = await context.supabase
       .from("profiles")
-      .update({ notify_email: data.email, notify_telegram: data.telegram, notify_whatsapp: data.whatsapp })
+      .update({ notification_preference: channels.join(",") })
       .eq("id", context.userId);
     if (error) throw new Error(error.message);
     return data;
   });
 
-// ─── Query options ────────────────────────────────────────────────────────────
+// ─── Query options ─────────────────────────────────────────────────────────────
 
-const jobsQO   = queryOptions({ queryKey: ["scraped-jobs"],  queryFn: () => listScrapedJobs() });
-const matchesQO = queryOptions({ queryKey: ["job-matches"],  queryFn: () => listJobMatches() });
-const prefsQO  = queryOptions({ queryKey: ["notif-prefs"],   queryFn: () => getNotifPrefs() });
+const jobsQO    = queryOptions({ queryKey: ["scraped-jobs"],  queryFn: () => listScrapedJobs() });
+const matchesQO = queryOptions({ queryKey: ["job-matches"],   queryFn: () => listJobMatches() });
+const cvsQO     = queryOptions({ queryKey: ["user-cvs"],      queryFn: () => listUserCVs() });
+const prefsQO   = queryOptions({ queryKey: ["notif-prefs"],   queryFn: () => getNotifPrefs() });
 
 export const Route = createFileRoute("/_authenticated/dashboard/jobs")({
   loader: ({ context }) => {
     context.queryClient.ensureQueryData(jobsQO);
     context.queryClient.ensureQueryData(matchesQO);
+    context.queryClient.ensureQueryData(cvsQO);
     context.queryClient.ensureQueryData(prefsQO);
   },
   errorComponent: ({ error }) => (
@@ -91,17 +118,15 @@ export const Route = createFileRoute("/_authenticated/dashboard/jobs")({
   component: Jobs,
 });
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Types (matching real schema column names) ─────────────────────────────────
 
 type ScrapedJob = {
   id: string;
-  title: string;        // Lovable uses "title" not "job_title"
+  job_title: string;       // real column: job_title
   company: string;
-  location: string | null;
   url: string | null;
   salary_range: string | null;
   created_at: string;
-  status: string | null;
 };
 
 type JobMatch = {
@@ -112,30 +137,33 @@ type JobMatch = {
   created_at: string;
   scraped_jobs: {
     id: string;
-    title: string;
+    job_title: string;    // real column: job_title
     company: string;
-    location: string | null;
     url: string | null;
     salary_range: string | null;
   } | null;
 };
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+type CVOption = { id: string; title: string };
+
+// ─── Helpers ───────────────────────────────────────────────────────────────────
 
 const STATUS_STYLE: Record<string, string> = {
   matched:           "bg-primary/15 text-primary border-primary/30",
   tailored:          "bg-[oklch(0.70_0.20_295)]/15 text-[oklch(0.78_0.18_295)] border-[oklch(0.70_0.20_295)]/30",
   applied_via_agent: "bg-[oklch(0.72_0.18_155)]/15 text-[oklch(0.78_0.16_155)] border-[oklch(0.72_0.18_155)]/30",
+  applied:           "bg-[oklch(0.72_0.18_155)]/15 text-[oklch(0.78_0.16_155)] border-[oklch(0.72_0.18_155)]/30",
   rejected:          "bg-destructive/10 text-destructive/80 border-destructive/30",
   new:               "bg-muted text-muted-foreground border-border",
 };
 
 const STATUS_LABEL: Record<string, string> = {
   applied_via_agent: "Applied (Agent)",
-  matched:  "Matched",
-  tailored: "Tailored",
-  rejected: "Rejected",
-  new:      "New",
+  applied:           "Applied",
+  matched:           "Matched",
+  tailored:          "Tailored",
+  rejected:          "Rejected",
+  new:               "New",
 };
 
 function relTime(iso: string) {
@@ -155,13 +183,150 @@ function ScoreBadge({ score }: { score: number }) {
   );
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
+// ─── Scrape Job Modal ──────────────────────────────────────────────────────────
+
+function ScrapeModal({
+  open, onClose, onSuccess,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [url, setUrl] = useState("");
+  const [scraping, setScraping] = useState(false);
+  const scrapeJobFn = useServerFn(scrapeJob);
+
+  const handleScrape = async () => {
+    if (!url.trim()) return toast.error("Enter a URL first");
+    setScraping(true);
+    try {
+      const result = await scrapeJobFn({ data: { url: url.trim() } });
+      toast.success(`Scraped: "${result.title}"`);
+      setUrl("");
+      onSuccess();
+      onClose();
+    } catch (e: any) {
+      toast.error(e.message ?? "Scraping failed");
+    } finally {
+      setScraping(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Link2 className="h-4 w-4 text-primary" />
+            Scrape a Job Posting
+          </DialogTitle>
+          <DialogDescription>
+            Paste any public job URL — the agent will fetch and extract the job description for you.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 pt-2">
+          <div className="flex gap-2">
+            <Input
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && !scraping && handleScrape()}
+              placeholder="https://jobs.lever.co/company/job-id"
+              disabled={scraping}
+              className="flex-1"
+            />
+            <Button
+              onClick={handleScrape}
+              disabled={scraping || !url.trim()}
+              className="bg-gradient-to-r from-primary to-[oklch(0.70_0.20_295)] text-primary-foreground border-0 shrink-0"
+            >
+              {scraping ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+            </Button>
+          </div>
+          {scraping && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin text-primary" />
+              Fetching and parsing page content…
+            </div>
+          )}
+          <p className="text-xs text-muted-foreground">
+            Works with most public job boards: LinkedIn, Lever, Greenhouse, Workday, and direct company pages.
+          </p>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Auto-Apply Button ─────────────────────────────────────────────────────────
+
+function AutoApplyButton({
+  jobId, matchId, cvs, currentStatus, onApplied,
+}: {
+  jobId: string;
+  matchId: string;
+  cvs: CVOption[];
+  currentStatus: string;
+  onApplied: (matchId: string) => void;
+}) {
+  const [applying, setApplying] = useState(false);
+  const autoApplyFn = useServerFn(autoApply);
+
+  const alreadyApplied = currentStatus === "applied" || currentStatus === "applied_via_agent";
+
+  const handleApply = async () => {
+    if (alreadyApplied) return;
+    const cvId = cvs[0]?.id;
+    if (!cvId) {
+      toast.error("No CV found — build one in the CV Builder first.");
+      return;
+    }
+    setApplying(true);
+    toast.info("Agent is processing your application…", { duration: 3500 });
+    try {
+      await autoApplyFn({ data: { cv_id: cvId, job_id: jobId } });
+      toast.success("Application submitted!");
+      onApplied(matchId);
+    } catch (e: any) {
+      toast.error(e.message ?? "Auto-apply failed");
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  if (alreadyApplied) {
+    return (
+      <Badge variant="outline" className={STATUS_STYLE.applied}>
+        <CheckCircle2 className="mr-1 h-3 w-3" /> Applied
+      </Badge>
+    );
+  }
+
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      onClick={handleApply}
+      disabled={applying}
+      className="border-primary/40 text-primary hover:bg-primary/10 text-xs"
+    >
+      {applying
+        ? <><Loader2 className="mr-1.5 h-3 w-3 animate-spin" />Applying…</>
+        : <><Send className="mr-1.5 h-3 w-3" />Auto-Apply</>}
+    </Button>
+  );
+}
+
+// ─── Main Component ────────────────────────────────────────────────────────────
 
 function Jobs() {
   const queryClient = useQueryClient();
   const { data: jobs }    = useSuspenseQuery(jobsQO);
   const { data: matches } = useSuspenseQuery(matchesQO);
+  const { data: cvs }     = useSuspenseQuery(cvsQO);
   const { data: prefs }   = useSuspenseQuery(prefsQO);
+
+  const [scrapeOpen, setScrapeOpen] = useState(false);
+  const [appliedMatchIds, setAppliedMatchIds] = useState<Set<string>>(new Set());
 
   const setPrefsFn = useServerFn(setNotifPrefs);
   const prefsMutation = useMutation({
@@ -177,131 +342,163 @@ function Jobs() {
   const toggle = (channel: "email" | "telegram" | "whatsapp") =>
     prefsMutation.mutate({ ...prefs, [channel]: !prefs[channel] });
 
+  const handleScrapeSuccess = () => {
+    queryClient.invalidateQueries({ queryKey: ["scraped-jobs"] });
+  };
+
+  const handleApplied = (matchId: string) => {
+    setAppliedMatchIds((prev) => new Set([...prev, matchId]));
+  };
+
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
-      {/* Header */}
-      <div className="flex items-end justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Job Tracker & Scanner</h1>
-          <p className="text-sm text-muted-foreground">Live matches across hundreds of job boards.</p>
-        </div>
-        <div className="glass flex items-center gap-2 rounded-full px-3 py-1.5 text-xs">
-          <Activity className="h-3.5 w-3.5 animate-pulse text-[oklch(0.72_0.18_155)]" />
-          Scanning <span className="mx-1 font-semibold text-foreground">4× daily</span>
-        </div>
-      </div>
+    <>
+      <ScrapeModal
+        open={scrapeOpen}
+        onClose={() => setScrapeOpen(false)}
+        onSuccess={handleScrapeSuccess}
+      />
 
-      {/* Notification Channels */}
-      <Card className="glass border-border p-5">
-        <p className="mb-3 text-xs uppercase tracking-widest text-muted-foreground">Notification Channels</p>
-        <div className="grid gap-3 md:grid-cols-3">
-          <ChannelRow icon={<Mail className="h-4 w-4" />}          label="Email"    enabled={prefs.email}    onChange={() => toggle("email")}    saving={prefsMutation.isPending} />
-          <ChannelRow icon={<MessageCircle className="h-4 w-4" />} label="Telegram" enabled={prefs.telegram} onChange={() => toggle("telegram")} saving={prefsMutation.isPending} />
-          <ChannelRow icon={<Phone className="h-4 w-4" />}         label="WhatsApp" enabled={prefs.whatsapp} onChange={() => toggle("whatsapp")} saving={prefsMutation.isPending} />
+      <div className="mx-auto max-w-6xl space-y-5">
+        {/* Header */}
+        <div className="flex items-end justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold">Job Tracker &amp; Scanner</h1>
+            <p className="text-sm text-muted-foreground">Live matches across hundreds of job boards.</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <Button
+              onClick={() => setScrapeOpen(true)}
+              variant="outline"
+              size="sm"
+              className="border-primary/40 text-primary hover:bg-primary/10"
+            >
+              <Link2 className="mr-1.5 h-4 w-4" />
+              Scrape Job URL
+            </Button>
+            <div className="glass flex items-center gap-2 rounded-full px-3 py-1.5 text-xs">
+              <Activity className="h-3.5 w-3.5 animate-pulse text-[oklch(0.72_0.18_155)]" />
+              Scanning <span className="mx-1 font-semibold text-foreground">4× daily</span>
+            </div>
+          </div>
         </div>
-      </Card>
 
-      {/* Tabs */}
-      <Tabs defaultValue="matches">
-        <TabsList>
-          <TabsTrigger value="matches">
-            <TrendingUp className="mr-2 h-3.5 w-3.5" /> My Matches
-            {(matches as JobMatch[]).length > 0 && (
-              <Badge className="ml-2 bg-primary/20 text-primary border-0 text-[10px]">
-                {(matches as JobMatch[]).length}
-              </Badge>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="all">
-            <Search className="mr-2 h-3.5 w-3.5" /> All Scanned Jobs
-          </TabsTrigger>
-        </TabsList>
+        {/* Notification Channels */}
+        <Card className="glass border-border p-5">
+          <p className="mb-3 text-xs uppercase tracking-widest text-muted-foreground">Notification Channels</p>
+          <div className="grid gap-3 md:grid-cols-3">
+            <ChannelRow icon={<Mail className="h-4 w-4" />}          label="Email"    enabled={prefs.email}    onChange={() => toggle("email")}    saving={prefsMutation.isPending} />
+            <ChannelRow icon={<MessageCircle className="h-4 w-4" />} label="Telegram" enabled={prefs.telegram} onChange={() => toggle("telegram")} saving={prefsMutation.isPending} />
+            <ChannelRow icon={<Phone className="h-4 w-4" />}         label="WhatsApp" enabled={prefs.whatsapp} onChange={() => toggle("whatsapp")} saving={prefsMutation.isPending} />
+          </div>
+        </Card>
 
-        {/* My Matches */}
-        <TabsContent value="matches">
-          <Card className="glass overflow-hidden border-border">
-            {(matches as JobMatch[]).length === 0 ? (
-              <EmptyState
-                icon={<TrendingUp className="h-8 w-8 text-muted-foreground" />}
-                title="No matches yet"
-                desc="The agent scans jobs and matches them to your profile. Activate the agent to start."
-              />
-            ) : (
-              <div className="divide-y divide-border">
-                <div className="grid grid-cols-[1fr_140px_80px_130px_40px] bg-card/40 px-5 py-2.5 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                  <div>Job</div><div>Company</div><div className="text-center">Match</div><div>Status</div><div />
-                </div>
-                {(matches as JobMatch[]).map((m) => {
-                  const job = m.scraped_jobs;
-                  return (
-                    <div key={m.id} className="grid grid-cols-[1fr_140px_80px_130px_40px] items-center gap-3 px-5 py-3.5 hover:bg-muted/20 transition-colors">
-                      <div>
-                        <div className="text-sm font-medium">{job?.title}</div>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          {job?.location   && <span className="flex items-center gap-1 text-xs text-muted-foreground"><MapPin className="h-3 w-3" />{job.location}</span>}
-                          {job?.salary_range && <span className="text-xs text-[oklch(0.72_0.18_155)]">{job.salary_range}</span>}
-                        </div>
-                        {m.tailor_suggestions && (
-                          <div className="mt-1 flex items-start gap-1">
-                            <Sparkles className="mt-0.5 h-3 w-3 shrink-0 text-primary" />
-                            <p className="text-[11px] text-muted-foreground line-clamp-1">{m.tailor_suggestions}</p>
+        {/* Tabs */}
+        <Tabs defaultValue="matches">
+          <TabsList>
+            <TabsTrigger value="matches">
+              <TrendingUp className="mr-2 h-3.5 w-3.5" /> My Matches
+              {(matches as JobMatch[]).length > 0 && (
+                <Badge className="ml-2 bg-primary/20 text-primary border-0 text-[10px]">
+                  {(matches as JobMatch[]).length}
+                </Badge>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="all">
+              <Search className="mr-2 h-3.5 w-3.5" /> All Scanned Jobs
+            </TabsTrigger>
+          </TabsList>
+
+          {/* My Matches */}
+          <TabsContent value="matches">
+            <Card className="glass overflow-hidden border-border">
+              {(matches as JobMatch[]).length === 0 ? (
+                <EmptyState
+                  icon={<TrendingUp className="h-8 w-8 text-muted-foreground" />}
+                  title="No matches yet"
+                  desc="The agent scans jobs and matches them to your profile. Activate the agent to start."
+                />
+              ) : (
+                <div className="divide-y divide-border">
+                  <div className="grid grid-cols-[1fr_140px_80px_120px_120px_40px] bg-card/40 px-5 py-2.5 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                    <div>Job</div><div>Company</div><div className="text-center">Match</div><div>Status</div><div>Action</div><div />
+                  </div>
+                  {(matches as JobMatch[]).map((m) => {
+                    const job = m.scraped_jobs;
+                    const isApplied = appliedMatchIds.has(m.id);
+                    const effectiveStatus = isApplied ? "applied" : m.status;
+                    return (
+                      <div key={m.id} className="grid grid-cols-[1fr_140px_80px_120px_120px_40px] items-center gap-3 px-5 py-3.5 hover:bg-muted/20 transition-colors">
+                        <div>
+                          <div className="text-sm font-medium">{job?.job_title}</div>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            {job?.salary_range && <span className="text-xs text-[oklch(0.72_0.18_155)]">{job.salary_range}</span>}
                           </div>
-                        )}
+                          {m.tailor_suggestions && (
+                            <div className="mt-1 flex items-start gap-1">
+                              <Sparkles className="mt-0.5 h-3 w-3 shrink-0 text-primary" />
+                              <p className="text-[11px] text-muted-foreground line-clamp-1">{m.tailor_suggestions}</p>
+                            </div>
+                          )}
+                        </div>
+                        <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                          <Building2 className="h-3.5 w-3.5 shrink-0" />{job?.company}
+                        </span>
+                        <ScoreBadge score={m.match_score ?? 0} />
+                        <Badge variant="outline" className={`capitalize text-xs ${STATUS_STYLE[effectiveStatus] ?? STATUS_STYLE.matched}`}>
+                          {STATUS_LABEL[effectiveStatus] ?? effectiveStatus}
+                        </Badge>
+                        <AutoApplyButton
+                          jobId={job?.id ?? m.id}
+                          matchId={m.id}
+                          cvs={cvs as CVOption[]}
+                          currentStatus={effectiveStatus}
+                          onApplied={handleApplied}
+                        />
+                        {job?.url
+                          ? <a href={job.url} target="_blank" rel="noopener noreferrer"><Button variant="ghost" size="sm"><ExternalLink className="h-3.5 w-3.5" /></Button></a>
+                          : <div />}
                       </div>
-                      <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                        <Building2 className="h-3.5 w-3.5 shrink-0" />{job?.company}
-                      </span>
-                      <ScoreBadge score={m.match_score ?? 0} />
-                      <Badge variant="outline" className={`capitalize text-xs ${STATUS_STYLE[m.status] ?? STATUS_STYLE.matched}`}>
-                        {STATUS_LABEL[m.status] ?? m.status}
-                      </Badge>
-                      {job?.url
-                        ? <a href={job.url} target="_blank" rel="noopener noreferrer"><Button variant="ghost" size="sm"><ExternalLink className="h-3.5 w-3.5" /></Button></a>
+                    );
+                  })}
+                </div>
+              )}
+            </Card>
+          </TabsContent>
+
+          {/* All Jobs */}
+          <TabsContent value="all">
+            <Card className="glass overflow-hidden border-border">
+              {(jobs as ScrapedJob[]).length === 0 ? (
+                <EmptyState
+                  icon={<Search className="h-8 w-8 text-muted-foreground" />}
+                  title="No jobs scanned yet"
+                  desc="The scanner runs when the autonomous agent is active, or use the Scrape Job URL button above to add one manually."
+                />
+              ) : (
+                <div className="divide-y divide-border">
+                  <div className="grid grid-cols-[1fr_140px_100px_40px] bg-card/40 px-5 py-2.5 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                    <div>Job Title</div><div>Company</div><div>Found</div><div />
+                  </div>
+                  {(jobs as ScrapedJob[]).map((j) => (
+                    <div key={j.id} className="grid grid-cols-[1fr_140px_100px_40px] items-center gap-3 px-5 py-3.5 hover:bg-muted/20 transition-colors">
+                      <div>
+                        <div className="text-sm font-medium">{j.job_title}</div>
+                        {j.salary_range && <div className="text-xs text-[oklch(0.72_0.18_155)]">{j.salary_range}</div>}
+                      </div>
+                      <span className="flex items-center gap-1.5 text-sm text-muted-foreground"><Building2 className="h-3.5 w-3.5 shrink-0" />{j.company}</span>
+                      <span className="flex items-center gap-1 text-xs text-muted-foreground"><Calendar className="h-3 w-3" />{relTime(j.created_at)}</span>
+                      {j.url
+                        ? <a href={j.url} target="_blank" rel="noopener noreferrer"><Button variant="ghost" size="sm"><ExternalLink className="h-3.5 w-3.5" /></Button></a>
                         : <div />}
                     </div>
-                  );
-                })}
-              </div>
-            )}
-          </Card>
-        </TabsContent>
-
-        {/* All Jobs */}
-        <TabsContent value="all">
-          <Card className="glass overflow-hidden border-border">
-            {(jobs as ScrapedJob[]).length === 0 ? (
-              <EmptyState
-                icon={<Search className="h-8 w-8 text-muted-foreground" />}
-                title="No jobs scanned yet"
-                desc="The scanner runs when the autonomous agent is active."
-              />
-            ) : (
-              <div className="divide-y divide-border">
-                <div className="grid grid-cols-[1fr_140px_120px_100px_40px] bg-card/40 px-5 py-2.5 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                  <div>Job Title</div><div>Company</div><div>Location</div><div>Found</div><div />
+                  ))}
                 </div>
-                {(jobs as ScrapedJob[]).map((j) => (
-                  <div key={j.id} className="grid grid-cols-[1fr_140px_120px_100px_40px] items-center gap-3 px-5 py-3.5 hover:bg-muted/20 transition-colors">
-                    <div>
-                      <div className="text-sm font-medium">{j.title}</div>
-                      {j.salary_range && <div className="text-xs text-[oklch(0.72_0.18_155)]">{j.salary_range}</div>}
-                    </div>
-                    <span className="flex items-center gap-1.5 text-sm text-muted-foreground"><Building2 className="h-3.5 w-3.5 shrink-0" />{j.company}</span>
-                    <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                      {j.location ? <><MapPin className="h-3 w-3" />{j.location}</> : "—"}
-                    </span>
-                    <span className="flex items-center gap-1 text-xs text-muted-foreground"><Calendar className="h-3 w-3" />{relTime(j.created_at)}</span>
-                    {j.url
-                      ? <a href={j.url} target="_blank" rel="noopener noreferrer"><Button variant="ghost" size="sm"><ExternalLink className="h-3.5 w-3.5" /></Button></a>
-                      : <div />}
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
-        </TabsContent>
-      </Tabs>
-    </div>
+              )}
+            </Card>
+          </TabsContent>
+        </Tabs>
+      </div>
+    </>
   );
 }
 
