@@ -1,18 +1,33 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
-type Experience = { role: string; company: string; period: string; bullets: string };
+type Experience = {
+  role: string;
+  company: string;
+  period: string;
+  bullets: string;
+};
 type Education = { degree: string; school: string; year: string };
 type CV = {
-  profile: { name: string; title: string; email: string; phone: string; summary: string };
+  profile: {
+    name: string;
+    title: string;
+    email: string;
+    phone: string;
+    summary: string;
+  };
   experiences: Experience[];
   education: Education[];
   skills: string;
 };
 
-async function callGemini(prompt: string, systemInstruction: string): Promise<string> {
+async function callGemini(
+  prompt: string,
+  systemInstruction: string,
+): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error("GEMINI_API_KEY is not configured on the server.");
+  if (!apiKey)
+    throw new Error("GEMINI_API_KEY is not configured on the server.");
 
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`,
@@ -24,7 +39,7 @@ async function callGemini(prompt: string, systemInstruction: string): Promise<st
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: { temperature: 0.4, maxOutputTokens: 2048 },
       }),
-    }
+    },
   );
 
   if (!res.ok) {
@@ -62,6 +77,10 @@ Your task is to tailor a candidate's CV to match a specific job description.
 Rules:
 - Only rewrite profile.summary and each experience's bullets field.
 - Keep all facts accurate — do not invent roles, companies, dates or skills.
+- NEVER create fictional jobs, change past employer names, or add fake companies to the work experience section.
+- The user has NOT worked at the target company. Do not add the target company to their past history.
+- Only optimize, reword, and reorder the bullet points of their EXISTING experiences to highlight matching skills, frameworks, and keywords required by the target job description.
+- Do NOT add new experience entries. The number of experiences in the output must equal the input.
 - Mirror the language, keywords, and priorities of the job description.
 - Make the summary 3-4 impactful sentences.
 - Rewrite bullet points to highlight impact and relevance using strong action verbs.
@@ -73,7 +92,11 @@ Rules:
     const raw = await callGemini(prompt, systemInstruction);
 
     // 3. Parse JSON (strip any accidental markdown fences)
-    const clean = raw.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
+    const clean = raw
+      .replace(/^```json\s*/i, "")
+      .replace(/^```\s*/i, "")
+      .replace(/```\s*$/i, "")
+      .trim();
     let parsed: { tailored_cv: CV; changes_summary: string };
     try {
       parsed = JSON.parse(clean);
@@ -127,12 +150,18 @@ Rules:
     const prompt = `Parse this CV:\n\n${data.raw_text}`;
     const raw = await callGemini(prompt, systemInstruction);
 
-    const clean = raw.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
+    const clean = raw
+      .replace(/^```json\s*/i, "")
+      .replace(/^```\s*/i, "")
+      .replace(/```\s*$/i, "")
+      .trim();
     let parsed: CV;
     try {
       parsed = JSON.parse(clean);
     } catch {
-      throw new Error("Could not parse CV — please check the text and try again.");
+      throw new Error(
+        "Could not parse CV — please check the text and try again.",
+      );
     }
 
     return parsed;

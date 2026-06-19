@@ -1,8 +1,17 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import {
-  Sparkles, Bot, Search, FileText, Zap, ShieldCheck,
-  Globe, CheckCircle2, Minus, XCircle, GraduationCap, RefreshCw,
+  Sparkles,
+  Bot,
+  Search,
+  FileText,
+  Zap,
+  ShieldCheck,
+  CheckCircle2,
+  Minus,
+  XCircle,
+  GraduationCap,
+  RefreshCw,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 
@@ -10,29 +19,71 @@ export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
       { title: "VentureApply AI — Apply to Jobs at Machine Speed" },
-      { name: "description", content: "AI-tailored CVs, 24/7 job scanning, and an autonomous agent that applies for you." },
+      {
+        name: "description",
+        content:
+          "AI-tailored CVs, 24/7 job scanning, and an autonomous agent that applies for you.",
+      },
       { property: "og:title", content: "VentureApply AI" },
-      { property: "og:description", content: "AI-tailored CVs, 24/7 job scanning, and an autonomous agent that applies for you." },
+      {
+        property: "og:description",
+        content:
+          "AI-tailored CVs, 24/7 job scanning, and an autonomous agent that applies for you.",
+      },
     ],
   }),
   component: Index,
 });
 
 const FEATURES = [
-  { icon: FileText, title: "AI CV Builder", desc: "Live preview, smart sections, ATS-ready output." },
-  { icon: Sparkles, title: "AI Tailor Engine", desc: "Gemini rewrites your CV to mirror any job description in seconds." },
-  { icon: Search, title: "24/7 Job Scanner", desc: "Continuous scraping with Telegram and email alerts." },
-  { icon: Bot, title: "Autonomous Agent", desc: "Watch the agent fill, answer and submit forms live." },
-  { icon: ShieldCheck, title: "Private & Secure", desc: "End-to-end encrypted, your data stays yours." },
-  { icon: Zap, title: "Instant Results", desc: "From profile to first auto-application in minutes." },
+  {
+    icon: FileText,
+    title: "AI CV Builder",
+    desc: "Live preview, smart sections, ATS-ready output.",
+  },
+  {
+    icon: Sparkles,
+    title: "AI Tailor Engine",
+    desc: "Gemini rewrites your CV to mirror any job description in seconds.",
+  },
+  {
+    icon: Search,
+    title: "24/7 Job Scanner",
+    desc: "Continuous scraping with Telegram and email alerts.",
+  },
+  {
+    icon: Bot,
+    title: "Autonomous Agent",
+    desc: "Watch the agent fill, answer and submit forms live.",
+  },
+  {
+    icon: ShieldCheck,
+    title: "Private & Secure",
+    desc: "End-to-end encrypted, your data stays yours.",
+  },
+  {
+    icon: Zap,
+    title: "Instant Results",
+    desc: "From profile to first auto-application in minutes.",
+  },
 ];
 
 const COMPARISON = [
-  { feature: "AI CV Tailoring",        va: "full",    linkedin: "none",    manual: "none" },
-  { feature: "Autonomous Applications",va: "full",    linkedin: "partial", manual: "none" },
-  { feature: "Real-time Alerts",       va: "full",    linkedin: "partial", manual: "none" },
-  { feature: "ATS Optimisation",       va: "full",    linkedin: "none",    manual: "none" },
-  { feature: "Free to start",          va: "full",    linkedin: "partial", manual: "full" },
+  { feature: "AI CV Tailoring", va: "full", linkedin: "none", manual: "none" },
+  {
+    feature: "Autonomous Applications",
+    va: "full",
+    linkedin: "partial",
+    manual: "none",
+  },
+  {
+    feature: "Real-time Alerts",
+    va: "full",
+    linkedin: "partial",
+    manual: "none",
+  },
+  { feature: "ATS Optimisation", va: "full", linkedin: "none", manual: "none" },
+  { feature: "Free to start", va: "full", linkedin: "partial", manual: "full" },
 ];
 
 const PERSONAS = [
@@ -56,8 +107,12 @@ const PERSONAS = [
 type Mark = "full" | "partial" | "none";
 
 function ComparisonMark({ type }: { type: Mark }) {
-  if (type === "full") return <CheckCircle2 className="mx-auto h-5 w-5 text-[oklch(0.72_0.18_155)]" />;
-  if (type === "partial") return <Minus className="mx-auto h-5 w-5 text-muted-foreground" />;
+  if (type === "full")
+    return (
+      <CheckCircle2 className="mx-auto h-5 w-5 text-[oklch(0.72_0.18_155)]" />
+    );
+  if (type === "partial")
+    return <Minus className="mx-auto h-5 w-5 text-muted-foreground" />;
   return <XCircle className="mx-auto h-5 w-5 text-destructive/50" />;
 }
 
@@ -70,16 +125,28 @@ function Index() {
           <div className="grid h-9 w-9 place-items-center rounded-lg bg-gradient-to-br from-primary to-[oklch(0.70_0.20_295)] glow">
             <Zap className="h-5 w-5 text-primary-foreground" />
           </div>
-          <span className="text-lg font-semibold tracking-tight">VentureApply</span>
+          <span className="text-lg font-semibold tracking-tight">
+            VentureApply
+          </span>
         </Link>
         <nav className="flex items-center gap-3">
-          <Link to="/pricing" className="hidden text-sm text-muted-foreground transition hover:text-foreground sm:block">
+          <Link
+            to="/pricing"
+            className="hidden text-sm text-muted-foreground transition hover:text-foreground sm:block"
+          >
             Pricing
           </Link>
           <ThemeToggle />
-          <Link to="/auth"><Button variant="ghost" size="sm">Sign in</Button></Link>
           <Link to="/auth">
-            <Button size="sm" className="bg-gradient-to-r from-primary to-[oklch(0.70_0.20_295)] text-primary-foreground border-0 glow">
+            <Button variant="ghost" size="sm">
+              Sign in
+            </Button>
+          </Link>
+          <Link to="/auth">
+            <Button
+              size="sm"
+              className="bg-gradient-to-r from-primary to-[oklch(0.70_0.20_295)] text-primary-foreground border-0 glow"
+            >
               Get started
             </Button>
           </Link>
@@ -101,24 +168,31 @@ function Index() {
             .
           </h1>
           <p className="mx-auto mt-5 max-w-xl text-base text-muted-foreground md:text-lg">
-            Tailor your CV with AI, scan thousands of jobs 24/7, and let an autonomous agent submit applications while you sleep.
+            Tailor your CV with AI, scan thousands of jobs 24/7, and let an
+            autonomous agent submit applications while you sleep.
           </p>
           <div className="mt-8 flex items-center justify-center gap-3">
             <Link to="/auth">
-              <Button size="lg" className="bg-gradient-to-r from-primary to-[oklch(0.70_0.20_295)] text-primary-foreground border-0 glow">
+              <Button
+                size="lg"
+                className="bg-gradient-to-r from-primary to-[oklch(0.70_0.20_295)] text-primary-foreground border-0 glow"
+              >
                 Start free
               </Button>
             </Link>
-            <a href="#features"><Button size="lg" variant="outline">See features</Button></a>
+            <a href="#features">
+              <Button size="lg" variant="outline">
+                See features
+              </Button>
+            </a>
           </div>
         </section>
 
-        {/* ── Trust banner ── */}
+        {/* ── Community value prop ── */}
         <div className="mx-auto mt-10 flex max-w-lg items-center justify-center gap-3 rounded-full border border-border bg-card/40 px-5 py-2.5 backdrop-blur">
-          <Globe className="h-4 w-4 text-primary" />
+          <Sparkles className="h-4 w-4 text-primary" />
           <span className="text-sm text-muted-foreground">
-            Trusted by job seekers across{" "}
-            <span className="font-semibold text-foreground">12 countries</span>
+            Built by job seekers, for job seekers — open and community-driven
           </span>
         </div>
 
@@ -137,9 +211,12 @@ function Index() {
 
         {/* ── Comparison table ── */}
         <section className="mt-20">
-          <h2 className="mb-2 text-center text-2xl font-bold">Why VentureApply?</h2>
+          <h2 className="mb-2 text-center text-2xl font-bold">
+            Why VentureApply?
+          </h2>
           <p className="mb-8 text-center text-sm text-muted-foreground">
-            We go far beyond what traditional job boards and manual applications offer.
+            We go far beyond what traditional job boards and manual applications
+            offer.
           </p>
           <div className="glass overflow-hidden rounded-2xl border border-border">
             {/* Header */}
@@ -171,7 +248,10 @@ function Index() {
           </p>
           <div className="grid gap-5 md:grid-cols-3">
             {PERSONAS.map(({ icon: Icon, title, desc }) => (
-              <div key={title} className="glass rounded-2xl border border-border p-6 text-center">
+              <div
+                key={title}
+                className="glass rounded-2xl border border-border p-6 text-center"
+              >
                 <div className="mx-auto mb-4 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 to-[oklch(0.70_0.20_295)]/20 text-primary">
                   <Icon className="h-6 w-6" />
                 </div>
@@ -186,7 +266,9 @@ function Index() {
         <section className="mt-20 text-center">
           <div className="glass inline-block rounded-2xl border border-border px-10 py-10">
             <h2 className="text-2xl font-bold">Simple, transparent pricing</h2>
-            <p className="mt-2 text-sm text-muted-foreground">Start free. Upgrade when you're ready to automate.</p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Start free. Upgrade when you're ready to automate.
+            </p>
             <Link to="/pricing">
               <Button
                 size="lg"
