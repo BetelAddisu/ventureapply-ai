@@ -27,7 +27,7 @@ export function getSupabaseBrowserConfigError(): string {
       ? ['SUPABASE_PUBLISHABLE_KEY']
       : []),
   ];
-  return `Missing Supabase environment variable(s): ${missing.join(', ')}. Connect Supabase in Lovable Cloud.`;
+  return `Missing Supabase environment variable(s): ${missing.join(', ')}. Set them in your local .env file and deployment provider.`;
 }
 
 export function hasSupabaseBrowserConfig() {
