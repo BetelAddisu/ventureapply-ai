@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
+import { TrialStatusBadge } from "@/components/trial-status-badge";
 import { FileText, Sparkles, Search, Bot, ArrowRight } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/dashboard/")({
@@ -10,14 +11,13 @@ export const Route = createFileRoute("/_authenticated/dashboard/")({
 
 function DashboardHome() {
   const [name, setName] = useState<string>("");
-  const [tier, setTier] = useState<string>("freemium");
 
   useEffect(() => {
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-      const { data } = await supabase.from("profiles").select("full_name, current_tier, onboarded").eq("id", user.id).maybeSingle();
-      if (data) { setName(data.full_name ?? ""); setTier(data.current_tier ?? "freemium"); }
+      const { data } = await supabase.from("profiles").select("full_name").eq("id", user.id).maybeSingle();
+      if (data) setName(data.full_name ?? "");
     })();
   }, []);
 
@@ -32,10 +32,10 @@ function DashboardHome() {
     <div className="mx-auto max-w-6xl space-y-6">
       <div>
         <p className="text-xs uppercase tracking-widest text-muted-foreground">Console</p>
-        <h1 className="mt-1 text-3xl font-semibold">Welcome back{name ? `, ${name.split(" ")[0]}` : ""}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Tier: <span className="text-foreground capitalize">{tier}</span>
-        </p>
+        <div className="mt-1 flex flex-wrap items-center gap-3">
+          <h1 className="text-3xl font-semibold">Welcome back{name ? `, ${name.split(" ")[0]}` : ""}</h1>
+          <TrialStatusBadge showUpgradeCta />
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">

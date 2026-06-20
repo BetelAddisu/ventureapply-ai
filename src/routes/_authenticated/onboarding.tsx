@@ -8,13 +8,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { TrialStatusBadge } from "@/components/trial-status-badge";
 import {
   User, Briefcase, Zap, Bot, Sparkles, Check,
-  ChevronRight, ChevronLeft, Loader2, GraduationCap,
+  ChevronRight, ChevronLeft, Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 
 // ─── Server function ──────────────────────────────────────────────────────────
+// NOTE: current_tier is intentionally NOT accepted here. Tier is granted
+// automatically at signup (see handle_new_user() in the trial migration) and
+// can only ever change via a server-side/service-role write — never from
+// this form. The "Choose Plan" step below is purely informational.
 
 const saveProfile = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -22,14 +27,13 @@ const saveProfile = createServerFn({ method: "POST" })
     full_name: string;
     target_title: string;
     experience_level: string;
-    current_tier: string;
     search_urgency: string;
   }) => d)
   .handler(async ({ data, context }) => {
-    const { full_name, target_title, experience_level, current_tier } = data;
+    const { full_name, target_title, experience_level, search_urgency } = data;
     const { error } = await context.supabase
       .from("profiles")
-      .upsert({ id: context.userId, full_name, target_title, experience_level, current_tier })
+      .update({ full_name, target_title, experience_level, search_urgency })
       .eq("id", context.userId);
     if (error) throw new Error(error.message);
     return { ok: true };
@@ -39,7 +43,7 @@ export const Route = createFileRoute("/_authenticated/onboarding")({
   component: Onboarding,
 });
 
-// ─── Tier definitions ─────────────────────────────────────────────────────────
+// ─── Tier definitions (display only — see note above) ─────────────────────
 
 const TIERS = [
   {
@@ -87,7 +91,7 @@ const URGENCY_OPTIONS = [
 
 // ─── Step indicator ───────────────────────────────────────────────────────────
 
-const STEPS = ["Your Details", "Experience", "Search Goal", "Choose Plan"];
+const STEPS = ["Your Details", "Experience", "Search Goal", "Your Plan"];
 
 function StepIndicator({ current }: { current: number }) {
   return (
@@ -130,7 +134,6 @@ function Onboarding() {
   const [targetTitle, setTargetTitle] = useState("");
   const [experienceLevel, setExperienceLevel] = useState("");
   const [searchUrgency, setSearchUrgency] = useState("");
-  const [tier, setTier] = useState("free");
 
   const next = () => setStep((s) => Math.min(s + 1, STEPS.length - 1));
   const back = () => setStep((s) => Math.max(s - 1, 0));
@@ -144,7 +147,6 @@ function Onboarding() {
           full_name: fullName,
           target_title: targetTitle,
           experience_level: experienceLevel,
-          current_tier: tier,
           search_urgency: searchUrgency,
         },
       });
@@ -277,25 +279,27 @@ function Onboarding() {
             </div>
           )}
 
-          {/* ── Step 3: Tier ── */}
+          {/* ── Step 3: Plan (read-only / informational) ──
+               No selection here writes anything. current_tier is granted
+               automatically at signup and changes only via server-side logic. */}
           {step === 3 && (
             <div className="space-y-5">
-              <div>
-                <h2 className="text-xl font-bold">Choose your plan</h2>
-                <p className="mt-1 text-sm text-muted-foreground">Start free — upgrade anytime. No credit card required for free tier.</p>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-bold">Your plan</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Every new account starts on a full-access trial automatically — no card, no setup.
+                  </p>
+                </div>
+                <TrialStatusBadge />
               </div>
               <div className="grid gap-3">
                 {TIERS.map((t) => {
                   const Icon = t.icon;
                   return (
-                    <button
+                    <div
                       key={t.id}
-                      onClick={() => setTier(t.id)}
-                      className={`relative rounded-xl border p-4 text-left transition-all ${
-                        tier === t.id
-                          ? `${t.color} bg-primary/5 shadow-sm`
-                          : "border-border bg-card/40 hover:border-primary/40"
-                      }`}
+                      className="relative rounded-xl border border-border bg-card/40 p-4 text-left"
                     >
                       {t.badge && (
                         <Badge className="absolute right-3 top-3 bg-gradient-to-r from-primary to-[oklch(0.70_0.20_295)] text-primary-foreground border-0 text-[10px]">
@@ -303,11 +307,7 @@ function Onboarding() {
                         </Badge>
                       )}
                       <div className="flex items-start gap-3">
-                        <div className={`mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg ${
-                          tier === t.id
-                            ? "bg-gradient-to-br from-primary to-[oklch(0.70_0.20_295)] text-primary-foreground"
-                            : "bg-muted text-muted-foreground"
-                        }`}>
+                        <div className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
                           <Icon className="h-4 w-4" />
                         </div>
                         <div className="flex-1">
@@ -323,16 +323,15 @@ function Onboarding() {
                             ))}
                           </ul>
                         </div>
-                        {tier === t.id && (
-                          <div className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-primary">
-                            <Check className="h-3 w-3 text-primary-foreground" />
-                          </div>
-                        )}
                       </div>
-                    </button>
+                    </div>
                   );
                 })}
               </div>
+              <p className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                ✨ You currently have full Premium Agent access as part of your trial. This list is just so you
+                know what each tier includes going forward.
+              </p>
             </div>
           )}
 
