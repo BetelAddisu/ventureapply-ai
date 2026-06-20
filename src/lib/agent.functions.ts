@@ -58,9 +58,23 @@ export const listAgentLogs = createServerFn({ method: "GET" })
     return data ?? [];
   });
 
-// ─── Run Agent Sequence (Phase 1 & 2 MVP) ────────────────────────────────────
+// ─── ATS engine detection ───────────────────────────────────────────────
+// Internal identifiers only — see jobs.functions.ts for the matching
+// implementation. displayName is kept for the user's own application
+// note/log, never surfaced in generic UI copy (phase text, tooltips, etc).
+type ATSEngineType = "ATS_Engine_Type_A" | "ATS_Engine_Type_B" | "unsupported";
+
+function detectAtsEngine(url: string): { engine: ATSEngineType; displayName: string } {
+  if (url.includes("greenhouse.io")) return { engine: "ATS_Engine_Type_A", displayName: "Greenhouse" };
+  if (url.includes("lever.co")) return { engine: "ATS_Engine_Type_B", displayName: "Lever" };
+  return { engine: "unsupported", displayName: "Custom portal" };
+}
+
+// ─── Run Agent Sequence (Phase 1 & 2 MVP) ────────────────────────────────
 // Executes the autonomous application sequence for a given job. Writes to
-// job_applications and agent_logs, with ATS domain validation.
+// job_applications and agent_logs. Phase copy is now generic/abstracted
+// (no platform names) — only the application's own note field, which the
+// user can see in their own history, records which real ATS was used.
 
 export const runAgentSequence = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -71,9 +85,8 @@ export const runAgentSequence = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { job_id, job_title, company, url } = data;
 
-    // Determine ATS support
-    const isSupportedATS =
-      url.includes("greenhouse.io") || url.includes("lever.co");
+    const { engine, displayName } = detectAtsEngine(url);
+    const isSupportedATS = engine !== "unsupported";
 
     // Simulate processing delay (server-side portion)
     await new Promise((resolve) => setTimeout(resolve, 1500));
@@ -90,8 +103,8 @@ export const runAgentSequence = createServerFn({ method: "POST" })
         status: isSupportedATS ? "applied" : "queued",
         applied_at: isSupportedATS ? new Date().toISOString() : null,
         note: isSupportedATS
-          ? "Applied via automated emulation agent (Greenhouse/Lever ATS)."
-          : "Custom framework detected. Application queued for manual override agent processing.",
+          ? `Applied via automated emulation agent (${displayName}).`
+          : "Custom portal detected. Application queued for manual override agent processing.",
         match_score: 0,
       })
       .select("id")
@@ -99,12 +112,13 @@ export const runAgentSequence = createServerFn({ method: "POST" })
 
     if (appErr) throw new Error(`Application insert failed: ${appErr.message}`);
 
-    // Insert agent log trace
+    // Insert agent log trace — generic action label, no platform name in
+    // the log text itself; the engine id is enough for internal debugging.
     await context.supabase.from("agent_logs").insert({
       user_id: context.userId,
       application_id: inserted.id,
       company,
-      action: `Successfully completed background application sequence for ${job_title} via automated emulation agent.`,
+      action: `Completed application sequence for ${job_title} (engine: ${engine}).`,
       status: isSupportedATS ? "success" : "pending",
     });
 
@@ -114,6 +128,6 @@ export const runAgentSequence = createServerFn({ method: "POST" })
       status: isSupportedATS ? "applied" : "queued",
       message: isSupportedATS
         ? "Application submitted successfully via beta agent!"
-        : "Custom framework detected. Application queued for manual override agent processing.",
+        : "Custom portal detected. Application queued for manual override agent processing.",
     };
   });
