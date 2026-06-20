@@ -7,6 +7,8 @@ type BrowserSupabaseConfig = {
   publishableKey: string;
 };
 
+const SUPABASE_PROJECT_REF_STORAGE_KEY = 'ventureapply.supabase.project-ref';
+
 export function getSupabaseBrowserConfig(): BrowserSupabaseConfig | null {
   const url = import.meta.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
   const publishableKey =
@@ -34,6 +36,31 @@ export function hasSupabaseBrowserConfig() {
   return getSupabaseBrowserConfig() !== null;
 }
 
+export function getSupabaseProjectRef(url: string) {
+  try {
+    return new URL(url).hostname.split('.')[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function getSupabaseBrowserProjectRef() {
+  const config = getSupabaseBrowserConfig();
+  return config ? getSupabaseProjectRef(config.url) : null;
+}
+
+function syncSupabaseProjectStorage(projectRef: string | null) {
+  if (typeof window === 'undefined' || !projectRef) return;
+
+  const previousProjectRef = window.localStorage.getItem(SUPABASE_PROJECT_REF_STORAGE_KEY);
+  if (previousProjectRef && previousProjectRef !== projectRef) {
+    window.localStorage.removeItem(`sb-${previousProjectRef}-auth-token`);
+    window.localStorage.removeItem(`sb-${previousProjectRef}-auth-token-code-verifier`);
+  }
+
+  window.localStorage.setItem(SUPABASE_PROJECT_REF_STORAGE_KEY, projectRef);
+}
+
 function createSupabaseClient() {
   const config = getSupabaseBrowserConfig();
   if (!config) {
@@ -42,8 +69,12 @@ function createSupabaseClient() {
     throw new Error(message);
   }
 
+  const projectRef = getSupabaseProjectRef(config.url);
+  syncSupabaseProjectStorage(projectRef);
+
   return createClient<Database>(config.url, config.publishableKey, {
     auth: {
+      storageKey: projectRef ? `sb-${projectRef}-auth-token` : undefined,
       storage: typeof window !== 'undefined' ? localStorage : undefined,
       persistSession: true,
       autoRefreshToken: true,

@@ -30,8 +30,12 @@ function AuthPage() {
   useEffect(() => {
     if (!supabaseConfigured) return;
 
-    supabase.auth.getSession().then(({ data }) => {
-      if (data.session) navigate({ to: "/dashboard" });
+    supabase.auth.getUser().then(async ({ data, error }) => {
+      if (error || !data.user) {
+        await supabase.auth.signOut({ scope: "local" });
+        return;
+      }
+      navigate({ to: "/dashboard" });
     });
   }, [navigate, supabaseConfigured]);
 

@@ -4,6 +4,29 @@ import { getRequest } from '@tanstack/react-start/server'
 import { createClient } from '@supabase/supabase-js'
 import type { Database } from './types'
 
+function getProjectRefFromUrl(url: string) {
+  try {
+    return new URL(url).hostname.split('.')[0] ?? null
+  } catch {
+    return null
+  }
+}
+
+function getTokenProjectRef(token: string) {
+  try {
+    const [, payload] = token.split('.')
+    if (!payload) return null
+
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/')
+    const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4)
+    const decoded = JSON.parse(Buffer.from(padded, 'base64').toString('utf8'))
+    const issuer = typeof decoded?.iss === 'string' ? decoded.iss : ''
+    return issuer ? getProjectRefFromUrl(issuer) : null
+  } catch {
+    return null
+  }
+}
+
 
 
 export const requireSupabaseAuth = createMiddleware({ type: 'function' }).server(
@@ -41,6 +64,14 @@ export const requireSupabaseAuth = createMiddleware({ type: 'function' }).server
     const token = authHeader.replace('Bearer ', '');
     if (!token) {
       throw new Error('Unauthorized: No token provided');
+    }
+
+    const envProjectRef = getProjectRefFromUrl(SUPABASE_URL);
+    const tokenProjectRef = getTokenProjectRef(token);
+    if (envProjectRef && tokenProjectRef && envProjectRef !== tokenProjectRef) {
+      throw new Error(
+        `Unauthorized: Token belongs to Supabase project "${tokenProjectRef}", but the server is configured for "${envProjectRef}". Sign out and sign in again after updating both VITE_ and server env vars.`,
+      );
     }
 
     const supabase = createClient<Database>(
