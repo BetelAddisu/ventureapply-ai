@@ -7,7 +7,7 @@ import {
 } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { createServerFn } from "@tanstack/react-start";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -106,6 +106,19 @@ const getNotifPrefs = createServerFn({ method: "GET" })
     };
   });
 
+const listApplicationStates = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { data, error } = await context.supabase
+      .from("job_applications")
+      .select("job_id, status, updated_at")
+      .eq("user_id", context.userId)
+      .order("updated_at", { ascending: false })
+      .limit(200);
+    if (error) throw new Error(error.message);
+    return (data ?? []) as JobApplicationState[];
+  });
+
 const setNotifPrefs = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(
@@ -142,6 +155,10 @@ const prefsQO = queryOptions({
   queryKey: ["notif-prefs"],
   queryFn: () => getNotifPrefs(),
 });
+const applicationStatesQO = queryOptions({
+  queryKey: ["job-application-states"],
+  queryFn: () => listApplicationStates(),
+});
 
 export const Route = createFileRoute("/_authenticated/dashboard/jobs")({
   loader: ({ context }) => {
@@ -149,6 +166,7 @@ export const Route = createFileRoute("/_authenticated/dashboard/jobs")({
     context.queryClient.ensureQueryData(matchesQO);
     context.queryClient.ensureQueryData(cvsQO);
     context.queryClient.ensureQueryData(prefsQO);
+    context.queryClient.ensureQueryData(applicationStatesQO);
   },
   errorComponent: ({ error }) => (
     <div className="p-8 text-center text-sm text-muted-foreground">
@@ -187,6 +205,11 @@ type JobMatch = {
 
 type CVOption = { id: string; title: string };
 type LocationType = "any" | "remote" | "hybrid" | "onsite";
+type JobApplicationState = {
+  job_id: string | null;
+  status: string;
+  updated_at: string;
+};
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -195,6 +218,8 @@ const STATUS_STYLE: Record<string, string> = {
   tailored: "bg-[oklch(0.70_0.20_295)]/15 text-[oklch(0.78_0.18_295)] border-[oklch(0.70_0.20_295)]/30",
   applied_via_agent: "bg-[oklch(0.72_0.18_155)]/15 text-[oklch(0.78_0.16_155)] border-[oklch(0.72_0.18_155)]/30",
   applied: "bg-[oklch(0.72_0.18_155)]/15 text-[oklch(0.78_0.16_155)] border-[oklch(0.72_0.18_155)]/30",
+  queued: "bg-muted text-muted-foreground border-border",
+  processing: "bg-primary/15 text-primary border-primary/30",
   rejected: "bg-destructive/10 text-destructive/80 border-destructive/30",
   new: "bg-muted text-muted-foreground border-border",
 };
@@ -202,11 +227,18 @@ const STATUS_STYLE: Record<string, string> = {
 const STATUS_LABEL: Record<string, string> = {
   applied_via_agent: "Applied (Agent)",
   applied: "Applied",
+  queued: "Queued",
+  processing: "Processing",
   matched: "Matched",
   tailored: "Tailored",
   rejected: "Rejected",
   new: "New",
 };
+
+function normalizeApplicationStatus(status: string) {
+  if (status === "applied_via_agent") return "applied";
+  return status;
+}
 
 function relTime(iso: string) {
   const s = Math.max(1, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
@@ -389,19 +421,24 @@ function AutoApplyButton({
   currentStatus,
   onApplied,
 }: {
-  jobId: string;
+  jobId?: string;
   matchId: string;
   cvs: CVOption[];
   currentStatus: string;
-  onApplied: (matchId: string) => void;
+  onApplied: (jobId: string, nextStatus: string) => void;
 }) {
   const [applying, setApplying] = useState(false);
   const autoApplyFn = useServerFn(autoApply);
 
   const alreadyApplied = currentStatus === "applied" || currentStatus === "applied_via_agent";
+  const isQueuedOrProcessing = currentStatus === "queued" || currentStatus === "processing";
 
   const handleApply = async () => {
-    if (alreadyApplied) return;
+    if (alreadyApplied || isQueuedOrProcessing) return;
+    if (!jobId) {
+      toast.error("This match is missing its linked job record. Re-scan jobs and try again.");
+      return;
+    }
     const cvId = cvs[0]?.id;
     if (!cvId) {
       toast.error("No CV found — build one in the CV Builder first.");
@@ -410,9 +447,9 @@ function AutoApplyButton({
     setApplying(true);
     toast.info("Agent is processing your application…", { duration: 3500 });
     try {
-      await autoApplyFn({ data: { cv_id: cvId, job_id: jobId } });
-      toast.success("Application submitted!");
-      onApplied(matchId);
+      const result = await autoApplyFn({ data: { cv_id: cvId, job_id: jobId } });
+      toast.success(result.message);
+      onApplied(jobId, normalizeApplicationStatus(result.status));
     } catch (e: any) {
       toast.error(e.message ?? "Auto-apply failed");
     } finally {
@@ -424,6 +461,14 @@ function AutoApplyButton({
     return (
       <Badge variant="outline" className={STATUS_STYLE.applied}>
         <CheckCircle2 className="mr-1 h-3 w-3" /> Applied
+      </Badge>
+    );
+  }
+
+  if (isQueuedOrProcessing) {
+    return (
+      <Badge variant="outline" className={STATUS_STYLE[currentStatus]}>
+        {STATUS_LABEL[currentStatus] ?? currentStatus}
       </Badge>
     );
   }
@@ -464,9 +509,10 @@ function Jobs() {
   const { data: matches } = useSuspenseQuery(matchesQO);
   const { data: cvs } = useSuspenseQuery(cvsQO);
   const { data: prefs } = useSuspenseQuery(prefsQO);
+  const { data: applicationStates } = useSuspenseQuery(applicationStatesQO);
 
   const [scrapeOpen, setScrapeOpen] = useState(false);
-  const [appliedMatchIds, setAppliedMatchIds] = useState<Set<string>>(new Set());
+  const [optimisticStatuses, setOptimisticStatuses] = useState<Record<string, string>>({});
 
   const setPrefsFn = useServerFn(setNotifPrefs);
   const prefsMutation = useMutation({
@@ -482,12 +528,25 @@ function Jobs() {
   const toggle = (channel: "email" | "telegram" | "whatsapp") =>
     prefsMutation.mutate({ ...prefs, [channel]: !prefs[channel] });
 
+  const applicationStatusByJobId = useMemo(() => {
+    const next: Record<string, string> = {};
+    for (const row of applicationStates as JobApplicationState[]) {
+      if (!row.job_id || next[row.job_id]) continue;
+      next[row.job_id] = normalizeApplicationStatus(row.status);
+    }
+    return next;
+  }, [applicationStates]);
+
   const handleScanSuccess = () => {
     queryClient.invalidateQueries({ queryKey: ["scraped-jobs"] });
+    queryClient.invalidateQueries({ queryKey: ["job-matches"] });
+    queryClient.invalidateQueries({ queryKey: ["job-application-states"] });
   };
 
-  const handleApplied = (matchId: string) => {
-    setAppliedMatchIds((prev) => new Set([...prev, matchId]));
+  const handleApplied = (jobId: string, nextStatus: string) => {
+    setOptimisticStatuses((prev) => ({ ...prev, [jobId]: nextStatus }));
+    queryClient.invalidateQueries({ queryKey: ["job-matches"] });
+    queryClient.invalidateQueries({ queryKey: ["job-application-states"] });
   };
 
   return (
@@ -586,15 +645,18 @@ function Jobs() {
                   </div>
                   {(matches as JobMatch[]).map((m) => {
                     const job = m.scraped_jobs;
-                    const isApplied = appliedMatchIds.has(m.id);
-                    const effectiveStatus = isApplied ? "applied" : m.status;
+                    const jobId = job?.id ?? null;
+                    const effectiveStatus =
+                      (jobId ? optimisticStatuses[jobId] : undefined) ??
+                      (jobId ? applicationStatusByJobId[jobId] : undefined) ??
+                      m.status;
                     return (
                       <div
                         key={m.id}
                         className="grid grid-cols-[1fr_140px_80px_120px_120px_40px] items-center gap-3 px-5 py-3.5 hover:bg-muted/20 transition-colors"
                       >
                         <div>
-                          <div className="text-sm font-medium">{job?.job_title}</div>
+                          <div className="text-sm font-medium">{job?.job_title ?? "Untitled job"}</div>
                           <div className="flex items-center gap-2 mt-0.5">
                             {job?.salary_range && (
                               <span className="text-xs text-[oklch(0.72_0.18_155)]">{job.salary_range}</span>
@@ -611,7 +673,7 @@ function Jobs() {
                         </div>
                         <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
                           <Building2 className="h-3.5 w-3.5 shrink-0" />
-                          {job?.company}
+                          {job?.company ?? "Unknown company"}
                         </span>
                         <ScoreBadge score={m.match_score ?? 0} />
                         <Badge
@@ -621,7 +683,7 @@ function Jobs() {
                           {STATUS_LABEL[effectiveStatus] ?? effectiveStatus}
                         </Badge>
                         <AutoApplyButton
-                          jobId={job?.id ?? m.id}
+                          jobId={jobId ?? undefined}
                           matchId={m.id}
                           cvs={cvs as CVOption[]}
                           currentStatus={effectiveStatus}

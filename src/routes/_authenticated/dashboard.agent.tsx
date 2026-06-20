@@ -37,7 +37,7 @@ import {
   listAgentLogs,
   runAgentSequence,
 } from "@/lib/agent.functions";
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useRef } from "react";
 
 const TELEGRAM_BOT = "HireMe_AIBot";
 
@@ -304,13 +304,16 @@ function AgentRunner() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [phase, setPhase] = useState<number | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [jobUrl, setJobUrl] = useState("");
   const [jobTitle, setJobTitle] = useState("");
   const [company, setCompany] = useState("");
+  const runRequestIdRef = useRef(0);
 
   const runFn = useServerFn(runAgentSequence);
 
-  const isRunning = phase !== null;
+  const isRunning = phase !== null || isSubmitting;
+  const canRun = !isRunning && jobTitle.trim().length > 0 && company.trim().length > 0;
 
   const handleRun = useCallback(async () => {
     if (!jobTitle.trim() || !company.trim()) {
@@ -318,22 +321,27 @@ function AgentRunner() {
       return;
     }
 
+    const requestId = runRequestIdRef.current + 1;
+    runRequestIdRef.current = requestId;
+    const payload = {
+      job_title: jobTitle.trim(),
+      company: company.trim(),
+      url: jobUrl.trim() || undefined,
+    };
+
     // Phase animation sequence
     setPhase(0);
     await new Promise((r) => setTimeout(r, 1200));
+    if (runRequestIdRef.current !== requestId) return;
     setPhase(1);
     await new Promise((r) => setTimeout(r, 1200));
+    if (runRequestIdRef.current !== requestId) return;
     setPhase(2);
-    await new Promise((r) => setTimeout(r, 1200));
 
     try {
+      setIsSubmitting(true);
       const result = await runFn({
-        data: {
-          job_id: crypto.randomUUID(),
-          job_title: jobTitle.trim(),
-          company: company.trim(),
-          url: jobUrl.trim(),
-        },
+        data: payload,
       });
 
       if (result.ats_supported) {
@@ -346,9 +354,13 @@ function AgentRunner() {
 
       router.invalidate();
       queryClient.invalidateQueries({ queryKey: ["agent"] });
+      setJobTitle("");
+      setCompany("");
+      setJobUrl("");
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Agent sequence failed.");
     } finally {
+      setIsSubmitting(false);
       setPhase(null);
     }
   }, [jobTitle, company, jobUrl, runFn, router, queryClient]);
@@ -399,24 +411,27 @@ function AgentRunner() {
               placeholder="Job title"
               value={jobTitle}
               onChange={(e) => setJobTitle(e.target.value)}
+              disabled={isRunning}
             />
             <input
               className="rounded-md border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
               placeholder="Company"
               value={company}
               onChange={(e) => setCompany(e.target.value)}
+              disabled={isRunning}
             />
             <input
               className="rounded-md border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
               placeholder="Job URL (optional)"
               value={jobUrl}
               onChange={(e) => setJobUrl(e.target.value)}
+              disabled={isRunning}
             />
           </div>
         )}
 
         <Button
-          disabled={isRunning}
+          disabled={!canRun}
           onClick={handleRun}
           className="bg-gradient-to-r from-primary to-[oklch(0.70_0.20_295)] text-primary-foreground border-0 glow"
         >
@@ -425,7 +440,7 @@ function AgentRunner() {
           ) : (
             <Bot className="mr-2 h-4 w-4" />
           )}
-          {isRunning ? "Processing..." : "Execute Agent Sequence"}
+          {isSubmitting ? "Submitting..." : isRunning ? "Processing..." : "Execute Agent Sequence"}
         </Button>
       </div>
     </Card>

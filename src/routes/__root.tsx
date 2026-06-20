@@ -4,6 +4,7 @@ import {
   Link,
   createRootRouteWithContext,
   useRouter,
+  useRouterState,
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
@@ -13,9 +14,23 @@ import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { Toaster } from "@/components/ui/sonner";
 import { ThemeProvider } from "@/components/theme-provider";
-import { supabase } from "@/integrations/supabase/client";
+import {
+  supabase,
+  hasSupabaseBrowserConfig,
+  getSupabaseBrowserConfigError,
+} from "@/integrations/supabase/client";
 
 function NotFoundComponent() {
+  const router = useRouter();
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      void router.navigate({ to: "/", replace: true });
+    }, 1200);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [router]);
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="max-w-md text-center">
@@ -40,9 +55,21 @@ function NotFoundComponent() {
 function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   console.error(error);
   const router = useRouter();
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+
   useEffect(() => {
     reportLovableError(error, { boundary: "tanstack_root_error_component" });
   }, [error]);
+
+  useEffect(() => {
+    if (pathname === "/") return;
+
+    const timeoutId = window.setTimeout(() => {
+      void router.navigate({ to: "/", replace: true });
+    }, 1500);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [pathname, router]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
@@ -121,6 +148,11 @@ function RootComponent() {
   const router = useRouter();
 
   useEffect(() => {
+    if (!hasSupabaseBrowserConfig()) {
+      console.warn(`[Supabase] ${getSupabaseBrowserConfigError()}`);
+      return;
+    }
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
       if (event !== "SIGNED_IN" && event !== "SIGNED_OUT" && event !== "USER_UPDATED") return;
       router.invalidate();
