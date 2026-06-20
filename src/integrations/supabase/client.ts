@@ -2,24 +2,79 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 
-function createSupabaseClient() {
-  // Use import.meta.env for client-side (Vite build-time replacement)
-  // Fall back to process.env for SSR (server-side rendering)
-  const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
-  const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_PUBLISHABLE_KEY;
+type BrowserSupabaseConfig = {
+  url: string;
+  publishableKey: string;
+};
 
-  if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
-    const missing = [
-      ...(!SUPABASE_URL ? ['SUPABASE_URL'] : []),
-      ...(!SUPABASE_PUBLISHABLE_KEY ? ['SUPABASE_PUBLISHABLE_KEY'] : []),
-    ];
-    const message = `Missing Supabase environment variable(s): ${missing.join(', ')}. Connect Supabase in Lovable Cloud.`;
+const SUPABASE_PROJECT_REF_STORAGE_KEY = 'ventureapply.supabase.project-ref';
+
+export function getSupabaseBrowserConfig(): BrowserSupabaseConfig | null {
+  const url = import.meta.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
+  const publishableKey =
+    import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_PUBLISHABLE_KEY;
+
+  if (!url || !publishableKey) return null;
+
+  return { url, publishableKey };
+}
+
+export function getSupabaseBrowserConfigError(): string {
+  const config = getSupabaseBrowserConfig();
+  if (config) return '';
+
+  const missing = [
+    ...(!import.meta.env.VITE_SUPABASE_URL && !process.env.SUPABASE_URL ? ['SUPABASE_URL'] : []),
+    ...(!import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY && !process.env.SUPABASE_PUBLISHABLE_KEY
+      ? ['SUPABASE_PUBLISHABLE_KEY']
+      : []),
+  ];
+  return `Missing Supabase environment variable(s): ${missing.join(', ')}. Set them in your local .env file and deployment provider.`;
+}
+
+export function hasSupabaseBrowserConfig() {
+  return getSupabaseBrowserConfig() !== null;
+}
+
+export function getSupabaseProjectRef(url: string) {
+  try {
+    return new URL(url).hostname.split('.')[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function getSupabaseBrowserProjectRef() {
+  const config = getSupabaseBrowserConfig();
+  return config ? getSupabaseProjectRef(config.url) : null;
+}
+
+function syncSupabaseProjectStorage(projectRef: string | null) {
+  if (typeof window === 'undefined' || !projectRef) return;
+
+  const previousProjectRef = window.localStorage.getItem(SUPABASE_PROJECT_REF_STORAGE_KEY);
+  if (previousProjectRef && previousProjectRef !== projectRef) {
+    window.localStorage.removeItem(`sb-${previousProjectRef}-auth-token`);
+    window.localStorage.removeItem(`sb-${previousProjectRef}-auth-token-code-verifier`);
+  }
+
+  window.localStorage.setItem(SUPABASE_PROJECT_REF_STORAGE_KEY, projectRef);
+}
+
+function createSupabaseClient() {
+  const config = getSupabaseBrowserConfig();
+  if (!config) {
+    const message = getSupabaseBrowserConfigError();
     console.error(`[Supabase] ${message}`);
     throw new Error(message);
   }
 
-  return createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+  const projectRef = getSupabaseProjectRef(config.url);
+  syncSupabaseProjectStorage(projectRef);
+
+  return createClient<Database>(config.url, config.publishableKey, {
     auth: {
+      storageKey: projectRef ? `sb-${projectRef}-auth-token` : undefined,
       storage: typeof window !== 'undefined' ? localStorage : undefined,
       persistSession: true,
       autoRefreshToken: true,
@@ -37,4 +92,3 @@ export const supabase = new Proxy({} as ReturnType<typeof createSupabaseClient>,
     return Reflect.get(_supabase, prop, receiver);
   },
 });
-

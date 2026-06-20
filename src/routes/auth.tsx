@@ -1,6 +1,10 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import {
+  supabase,
+  hasSupabaseBrowserConfig,
+  getSupabaseBrowserConfigError,
+} from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,15 +24,24 @@ function AuthPage() {
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
   const [loading, setLoading] = useState(false);
+  const supabaseConfigured = hasSupabaseBrowserConfig();
+  const supabaseConfigError = getSupabaseBrowserConfigError();
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      if (data.session) navigate({ to: "/dashboard" });
+    if (!supabaseConfigured) return;
+
+    supabase.auth.getUser().then(async ({ data, error }) => {
+      if (error || !data.user) {
+        await supabase.auth.signOut({ scope: "local" });
+        return;
+      }
+      navigate({ to: "/dashboard" });
     });
-  }, [navigate]);
+  }, [navigate, supabaseConfigured]);
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!supabaseConfigured) return toast.error(supabaseConfigError);
     setLoading(true);
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     setLoading(false);
@@ -39,6 +52,7 @@ function AuthPage() {
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!supabaseConfigured) return toast.error(supabaseConfigError);
     setLoading(true);
     const { error } = await supabase.auth.signUp({
       email, password,
@@ -51,6 +65,7 @@ function AuthPage() {
   };
 
   const handleMagicLink = async () => {
+    if (!supabaseConfigured) return toast.error(supabaseConfigError);
     if (!email) return toast.error("Enter your email first");
     setLoading(true);
     const { error } = await supabase.auth.signInWithOtp({
@@ -97,6 +112,11 @@ function AuthPage() {
         <div className="glass w-full max-w-md rounded-2xl p-8">
           <h1 className="text-2xl font-semibold">Welcome</h1>
           <p className="mt-1 text-sm text-muted-foreground">Sign in or create your account to continue.</p>
+          {!supabaseConfigured && (
+            <div className="mt-4 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+              {supabaseConfigError}
+            </div>
+          )}
 
           <Tabs defaultValue="signin" className="mt-6">
             <TabsList className="grid w-full grid-cols-2">
@@ -107,16 +127,16 @@ function AuthPage() {
             <TabsContent value="signin" className="mt-5">
               <form onSubmit={handleSignIn} className="space-y-4">
                 <Field id="si-email" label="Email" icon={<Mail className="h-4 w-4" />}>
-                  <Input id="si-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="you@company.com" />
+                  <Input id="si-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="you@company.com" disabled={!supabaseConfigured || loading} />
                 </Field>
                 <Field id="si-pass" label="Password" icon={<Lock className="h-4 w-4" />}>
-                  <Input id="si-pass" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required placeholder="••••••••" />
+                  <Input id="si-pass" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required placeholder="••••••••" disabled={!supabaseConfigured || loading} />
                 </Field>
-                <Button type="submit" disabled={loading} className="w-full bg-gradient-to-r from-primary to-[oklch(0.70_0.20_295)] text-primary-foreground border-0">
+                <Button type="submit" disabled={loading || !supabaseConfigured} className="w-full bg-gradient-to-r from-primary to-[oklch(0.70_0.20_295)] text-primary-foreground border-0">
                   {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Sign in"}
                 </Button>
                 <div className="relative my-2 flex items-center"><span className="flex-1 border-t border-border" /><span className="px-3 text-xs text-muted-foreground">or</span><span className="flex-1 border-t border-border" /></div>
-                <Button type="button" variant="outline" className="w-full" disabled={loading} onClick={handleMagicLink}>
+                <Button type="button" variant="outline" className="w-full" disabled={loading || !supabaseConfigured} onClick={handleMagicLink}>
                   <Sparkles className="mr-2 h-4 w-4" /> Send magic link
                 </Button>
               </form>
@@ -125,15 +145,15 @@ function AuthPage() {
             <TabsContent value="signup" className="mt-5">
               <form onSubmit={handleSignUp} className="space-y-4">
                 <Field id="su-name" label="Full name">
-                  <Input id="su-name" value={fullName} onChange={(e) => setFullName(e.target.value)} required placeholder="Ada Lovelace" />
+                  <Input id="su-name" value={fullName} onChange={(e) => setFullName(e.target.value)} required placeholder="Ada Lovelace" disabled={!supabaseConfigured || loading} />
                 </Field>
                 <Field id="su-email" label="Email" icon={<Mail className="h-4 w-4" />}>
-                  <Input id="su-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+                  <Input id="su-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required disabled={!supabaseConfigured || loading} />
                 </Field>
                 <Field id="su-pass" label="Password" icon={<Lock className="h-4 w-4" />}>
-                  <Input id="su-pass" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} />
+                  <Input id="su-pass" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} disabled={!supabaseConfigured || loading} />
                 </Field>
-                <Button type="submit" disabled={loading} className="w-full bg-gradient-to-r from-primary to-[oklch(0.70_0.20_295)] text-primary-foreground border-0">
+                <Button type="submit" disabled={loading || !supabaseConfigured} className="w-full bg-gradient-to-r from-primary to-[oklch(0.70_0.20_295)] text-primary-foreground border-0">
                   {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create account"}
                 </Button>
               </form>

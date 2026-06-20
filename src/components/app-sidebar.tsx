@@ -1,6 +1,6 @@
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
 import { FileText, Sparkles, Search, Bot, LogOut, Zap, Settings } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase, hasSupabaseBrowserConfig } from "@/integrations/supabase/client";
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent,
   SidebarGroupLabel, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar,
@@ -23,6 +23,10 @@ export function AppSidebar() {
   const navigate = useNavigate();
 
   const signOut = async () => {
+    if (!hasSupabaseBrowserConfig()) {
+      navigate({ to: "/", replace: true });
+      return;
+    }
     await supabase.auth.signOut();
     toast.success("Signed out");
     navigate({ to: "/auth", replace: true });
