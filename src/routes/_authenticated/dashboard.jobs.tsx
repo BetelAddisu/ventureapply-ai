@@ -17,6 +17,9 @@ import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -51,8 +54,7 @@ const listScrapedJobs = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const { data, error } = await context.supabase
       .from("scraped_jobs")
-      // Real column names from schema: job_title, job_description (not title/description)
-      .select("id, job_title, company, url, salary_range, created_at")
+      .select("id, job_title, company, url, salary_range, location, created_at")
       .order("created_at", { ascending: false })
       .limit(50);
     if (error) throw new Error(error.message);
@@ -88,8 +90,6 @@ const listUserCVs = createServerFn({ method: "GET" })
     return (data ?? []) as CVOption[];
   });
 
-// Profiles uses a single `notification_preference` text column, not separate booleans.
-// We store email/telegram/whatsapp as a comma-separated string.
 const getNotifPrefs = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
@@ -158,14 +158,15 @@ export const Route = createFileRoute("/_authenticated/dashboard/jobs")({
   component: Jobs,
 });
 
-// ─── Types (matching real schema column names) ─────────────────────────────────
+// ─── Types ──────────────────────────────────────────────────────────────────────
 
 type ScrapedJob = {
   id: string;
-  job_title: string; // real column: job_title
+  job_title: string;
   company: string;
   url: string | null;
   salary_range: string | null;
+  location: string | null;
   created_at: string;
 };
 
@@ -177,7 +178,7 @@ type JobMatch = {
   created_at: string;
   scraped_jobs: {
     id: string;
-    job_title: string; // real column: job_title
+    job_title: string;
     company: string;
     url: string | null;
     salary_range: string | null;
@@ -185,17 +186,15 @@ type JobMatch = {
 };
 
 type CVOption = { id: string; title: string };
+type LocationType = "any" | "remote" | "hybrid" | "onsite";
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
 const STATUS_STYLE: Record<string, string> = {
   matched: "bg-primary/15 text-primary border-primary/30",
-  tailored:
-    "bg-[oklch(0.70_0.20_295)]/15 text-[oklch(0.78_0.18_295)] border-[oklch(0.70_0.20_295)]/30",
-  applied_via_agent:
-    "bg-[oklch(0.72_0.18_155)]/15 text-[oklch(0.78_0.16_155)] border-[oklch(0.72_0.18_155)]/30",
-  applied:
-    "bg-[oklch(0.72_0.18_155)]/15 text-[oklch(0.78_0.16_155)] border-[oklch(0.72_0.18_155)]/30",
+  tailored: "bg-[oklch(0.70_0.20_295)]/15 text-[oklch(0.78_0.18_295)] border-[oklch(0.70_0.20_295)]/30",
+  applied_via_agent: "bg-[oklch(0.72_0.18_155)]/15 text-[oklch(0.78_0.16_155)] border-[oklch(0.72_0.18_155)]/30",
+  applied: "bg-[oklch(0.72_0.18_155)]/15 text-[oklch(0.78_0.16_155)] border-[oklch(0.72_0.18_155)]/30",
   rejected: "bg-destructive/10 text-destructive/80 border-destructive/30",
   new: "bg-muted text-muted-foreground border-border",
 };
@@ -210,10 +209,7 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 function relTime(iso: string) {
-  const s = Math.max(
-    1,
-    Math.floor((Date.now() - new Date(iso).getTime()) / 1000),
-  );
+  const s = Math.max(1, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
   return `${Math.floor(s / 86400)}d ago`;
@@ -221,11 +217,7 @@ function relTime(iso: string) {
 
 function ScoreBadge({ score }: { score: number }) {
   const color =
-    score >= 80
-      ? "text-[oklch(0.72_0.18_155)]"
-      : score >= 60
-        ? "text-primary"
-        : "text-muted-foreground";
+    score >= 80 ? "text-[oklch(0.72_0.18_155)]" : score >= 60 ? "text-primary" : "text-muted-foreground";
   return (
     <div className="flex flex-col items-center gap-1 min-w-[60px]">
       <span className={`text-sm font-bold ${color}`}>{score}%</span>
@@ -234,7 +226,93 @@ function ScoreBadge({ score }: { score: number }) {
   );
 }
 
-// ─── Scrape Job Modal ──────────────────────────────────────────────────────────
+// ─── Scan Jobs for Me — primary, single-click flow ─────────────────────────
+// Default behavior: works with ZERO input (falls back to the user's CV
+// server-side). Keyword + location are optional refinements, not gates.
+
+function ScanJobsPanel({ onSuccess }: { onSuccess: () => void }) {
+  const [keyword, setKeyword] = useState("");
+  const [locationType, setLocationType] = useState<LocationType>("any");
+  const [scanning, setScanning] = useState(false);
+  const fetchJobsFn = useServerFn(fetchJobs);
+
+  const handleScan = async () => {
+    setScanning(true);
+    try {
+      const result = await fetchJobsFn({
+        data: { target_role: keyword.trim() || undefined, location_type: locationType },
+      });
+      if (result.inserted > 0) {
+        toast.success(result.message);
+        onSuccess();
+      } else {
+        toast.info(result.message);
+      }
+    } catch (e: any) {
+      toast.error(e.message ?? "Scan failed — please try again.");
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  return (
+    <Card className="glass relative overflow-hidden border-border p-6">
+      <div className="absolute inset-0 opacity-20 bg-gradient-to-br from-primary/30 to-[oklch(0.70_0.20_295)]/30 pointer-events-none" />
+      <div className="relative space-y-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="text-base font-semibold">Scan Jobs for Me</h2>
+          <Badge variant="outline" className="border-primary/40 bg-primary/10 text-primary text-[10px]">
+            One click — no setup required
+          </Badge>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          We search across job boards for you. Leave the keyword blank and we'll use your saved CV to figure out
+          what to search for.
+        </p>
+
+        <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+          <Input
+            placeholder="Optional — e.g. Frontend Developer (leave blank to use your CV)"
+            value={keyword}
+            onChange={(e) => setKeyword(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && !scanning && handleScan()}
+            disabled={scanning}
+          />
+          <Select value={locationType} onValueChange={(v) => setLocationType(v as LocationType)} disabled={scanning}>
+            <SelectTrigger className="w-full sm:w-[160px]">
+              <SelectValue placeholder="Location" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="any">Any location</SelectItem>
+              <SelectItem value="remote">Remote</SelectItem>
+              <SelectItem value="hybrid">Hybrid</SelectItem>
+              <SelectItem value="onsite">On-site</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <Button
+          onClick={handleScan}
+          disabled={scanning}
+          size="lg"
+          className="w-full bg-gradient-to-r from-primary to-[oklch(0.70_0.20_295)] text-primary-foreground border-0 glow sm:w-auto"
+        >
+          {scanning ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Scanning…
+            </>
+          ) : (
+            <>
+              <Search className="mr-2 h-4 w-4" /> Scan Jobs for Me
+            </>
+          )}
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+// ─── Scrape Job Modal — secondary, optional manual path ────────────────────
 
 function ScrapeModal({
   open,
@@ -254,12 +332,12 @@ function ScrapeModal({
     setScraping(true);
     try {
       const result = await scrapeJobFn({ data: { url: url.trim() } });
-      toast.success(`Scraped: "${result.title}"`);
+      toast.success(`Added: "${result.title}"`);
       setUrl("");
       onSuccess();
       onClose();
     } catch (e: any) {
-      toast.error(e.message ?? "Scraping failed");
+      toast.error(e.message ?? "Could not add that posting");
     } finally {
       setScraping(false);
     }
@@ -271,11 +349,11 @@ function ScrapeModal({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Link2 className="h-4 w-4 text-primary" />
-            Scrape a Job Posting
+            Add a specific posting (optional)
           </DialogTitle>
           <DialogDescription>
-            Paste any public job URL — the agent will fetch and extract the job
-            description for you.
+            Already found a job somewhere? Paste the link here to add it manually — this isn't required for the
+            normal flow.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 pt-2">
@@ -283,10 +361,8 @@ function ScrapeModal({
             <Input
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              onKeyDown={(e) =>
-                e.key === "Enter" && !scraping && handleScrape()
-              }
-              placeholder="https://jobs.lever.co/company/job-id"
+              onKeyDown={(e) => e.key === "Enter" && !scraping && handleScrape()}
+              placeholder="https://…"
               disabled={scraping}
               className="flex-1"
             />
@@ -295,105 +371,9 @@ function ScrapeModal({
               disabled={scraping || !url.trim()}
               className="bg-gradient-to-r from-primary to-[oklch(0.70_0.20_295)] text-primary-foreground border-0 shrink-0"
             >
-              {scraping ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Search className="h-4 w-4" />
-              )}
+              {scraping ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
             </Button>
           </div>
-          {scraping && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin text-primary" />
-              Fetching and parsing page content…
-            </div>
-          )}
-          <p className="text-xs text-muted-foreground">
-            Works with most public job boards: LinkedIn, Lever, Greenhouse,
-            Workday, and direct company pages.
-          </p>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ─── Fetch Jobs Modal ──────────────────────────────────────────────────────────
-
-function FetchJobsModal({
-  open,
-  onClose,
-  onSuccess,
-}: {
-  open: boolean;
-  onClose: () => void;
-  onSuccess: () => void;
-}) {
-  const [role, setRole] = useState("");
-  const [fetching, setFetching] = useState(false);
-  const fetchJobsFn = useServerFn(fetchJobs);
-
-  const handleFetch = async () => {
-    if (!role.trim()) return toast.error("Enter a target role first");
-    setFetching(true);
-    try {
-      const result = await fetchJobsFn({ data: { target_role: role.trim() } });
-      toast.success(result.message);
-      setRole("");
-      onSuccess();
-      onClose();
-    } catch (e: any) {
-      toast.error(e.message ?? "Fetching jobs failed");
-    } finally {
-      setFetching(false);
-    }
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Search className="h-4 w-4 text-primary" />
-            Fetch Remote Jobs
-          </DialogTitle>
-          <DialogDescription>
-            Search for real remote tech jobs by role. Results are saved to your
-            job tracker.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-4 pt-2">
-          <div className="flex gap-2">
-            <Input
-              value={role}
-              onChange={(e) => setRole(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && !fetching && handleFetch()}
-              placeholder="e.g. Frontend Developer, Data Engineer"
-              disabled={fetching}
-              className="flex-1"
-            />
-            <Button
-              onClick={handleFetch}
-              disabled={fetching || !role.trim()}
-              className="bg-gradient-to-r from-primary to-[oklch(0.70_0.20_295)] text-primary-foreground border-0 shrink-0"
-            >
-              {fetching ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Search className="h-4 w-4" />
-              )}
-            </Button>
-          </div>
-          {fetching && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin text-primary" />
-              Searching remote job listings…
-            </div>
-          )}
-          <p className="text-xs text-muted-foreground">
-            Powered by a free public jobs API. Returns up to 20 real, live
-            remote job postings.
-          </p>
         </div>
       </DialogContent>
     </Dialog>
@@ -418,8 +398,7 @@ function AutoApplyButton({
   const [applying, setApplying] = useState(false);
   const autoApplyFn = useServerFn(autoApply);
 
-  const alreadyApplied =
-    currentStatus === "applied" || currentStatus === "applied_via_agent";
+  const alreadyApplied = currentStatus === "applied" || currentStatus === "applied_via_agent";
 
   const handleApply = async () => {
     if (alreadyApplied) return;
@@ -470,10 +449,7 @@ function AutoApplyButton({
           </>
         )}
       </Button>
-      <Badge
-        variant="outline"
-        className="text-[9px] px-1.5 py-0 border-primary/30 text-primary/70 whitespace-nowrap"
-      >
+      <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-primary/30 text-primary/70 whitespace-nowrap">
         Beta
       </Badge>
     </div>
@@ -490,18 +466,12 @@ function Jobs() {
   const { data: prefs } = useSuspenseQuery(prefsQO);
 
   const [scrapeOpen, setScrapeOpen] = useState(false);
-  const [fetchOpen, setFetchOpen] = useState(false);
-  const [appliedMatchIds, setAppliedMatchIds] = useState<Set<string>>(
-    new Set(),
-  );
+  const [appliedMatchIds, setAppliedMatchIds] = useState<Set<string>>(new Set());
 
   const setPrefsFn = useServerFn(setNotifPrefs);
   const prefsMutation = useMutation({
-    mutationFn: (next: {
-      email: boolean;
-      telegram: boolean;
-      whatsapp: boolean;
-    }) => setPrefsFn({ data: next }),
+    mutationFn: (next: { email: boolean; telegram: boolean; whatsapp: boolean }) =>
+      setPrefsFn({ data: next }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["notif-prefs"] });
       toast.success("Notification preferences saved");
@@ -512,7 +482,7 @@ function Jobs() {
   const toggle = (channel: "email" | "telegram" | "whatsapp") =>
     prefsMutation.mutate({ ...prefs, [channel]: !prefs[channel] });
 
-  const handleScrapeSuccess = () => {
+  const handleScanSuccess = () => {
     queryClient.invalidateQueries({ queryKey: ["scraped-jobs"] });
   };
 
@@ -522,70 +492,38 @@ function Jobs() {
 
   return (
     <>
-      <ScrapeModal
-        open={scrapeOpen}
-        onClose={() => setScrapeOpen(false)}
-        onSuccess={handleScrapeSuccess}
-      />
-      <FetchJobsModal
-        open={fetchOpen}
-        onClose={() => setFetchOpen(false)}
-        onSuccess={handleScrapeSuccess}
-      />
+      <ScrapeModal open={scrapeOpen} onClose={() => setScrapeOpen(false)} onSuccess={handleScanSuccess} />
 
       <div className="mx-auto max-w-6xl space-y-5">
         {/* Header */}
-        <div className="flex items-end justify-between">
+        <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-semibold">
-                Job Tracker &amp; Scanner
-              </h1>
-              <Badge
-                variant="outline"
-                className="border-primary/40 bg-primary/10 text-primary text-[10px]"
-              >
-                Beta — Enabled for Standard ATS Forms (Greenhouse/Lever) Only
-              </Badge>
-            </div>
-            <p className="text-sm text-muted-foreground">
-              Live matches across hundreds of job boards.
-            </p>
+            <h1 className="text-2xl font-semibold">Job Tracker &amp; Scanner</h1>
+            <p className="text-sm text-muted-foreground">Live matches across hundreds of job boards.</p>
           </div>
           <div className="flex items-center gap-3">
-            <Button
-              onClick={() => setFetchOpen(true)}
-              variant="outline"
-              size="sm"
-              className="border-primary/40 text-primary hover:bg-primary/10"
-            >
-              <Search className="mr-1.5 h-4 w-4" />
-              Fetch Jobs
-            </Button>
-            <Button
-              onClick={() => setScrapeOpen(true)}
-              variant="outline"
-              size="sm"
-              className="border-primary/40 text-primary hover:bg-primary/10"
-            >
-              <Link2 className="mr-1.5 h-4 w-4" />
-              Scrape Job URL
-            </Button>
             <div className="glass flex items-center gap-2 rounded-full px-3 py-1.5 text-xs">
               <Activity className="h-3.5 w-3.5 animate-pulse text-[oklch(0.72_0.18_155)]" />
-              Scanning{" "}
-              <span className="mx-1 font-semibold text-foreground">
-                4× daily
-              </span>
+              Scanning <span className="mx-1 font-semibold text-foreground">4× daily</span>
             </div>
           </div>
         </div>
 
+        {/* Primary action: Scan Jobs for Me */}
+        <ScanJobsPanel onSuccess={handleScanSuccess} />
+
+        {/* Secondary, low-emphasis manual option */}
+        <button
+          onClick={() => setScrapeOpen(true)}
+          className="flex items-center gap-1.5 text-xs text-muted-foreground transition hover:text-primary"
+        >
+          <Link2 className="h-3 w-3" />
+          Have a specific posting already? Add it manually instead.
+        </button>
+
         {/* Notification Channels */}
         <Card className="glass border-border p-5">
-          <p className="mb-3 text-xs uppercase tracking-widest text-muted-foreground">
-            Notification Channels
-          </p>
+          <p className="mb-3 text-xs uppercase tracking-widest text-muted-foreground">Notification Channels</p>
           <div className="grid gap-3 md:grid-cols-3">
             <ChannelRow
               icon={<Mail className="h-4 w-4" />}
@@ -632,11 +570,9 @@ function Jobs() {
             <Card className="glass overflow-hidden border-border">
               {(matches as JobMatch[]).length === 0 ? (
                 <EmptyState
-                  icon={
-                    <TrendingUp className="h-8 w-8 text-muted-foreground" />
-                  }
+                  icon={<TrendingUp className="h-8 w-8 text-muted-foreground" />}
                   title="No matches yet"
-                  desc="The agent scans jobs and matches them to your profile. Activate the agent to start."
+                  desc="Click 'Scan Jobs for Me' above to get started — no keyword required."
                 />
               ) : (
                 <div className="divide-y divide-border">
@@ -658,14 +594,10 @@ function Jobs() {
                         className="grid grid-cols-[1fr_140px_80px_120px_120px_40px] items-center gap-3 px-5 py-3.5 hover:bg-muted/20 transition-colors"
                       >
                         <div>
-                          <div className="text-sm font-medium">
-                            {job?.job_title}
-                          </div>
+                          <div className="text-sm font-medium">{job?.job_title}</div>
                           <div className="flex items-center gap-2 mt-0.5">
                             {job?.salary_range && (
-                              <span className="text-xs text-[oklch(0.72_0.18_155)]">
-                                {job.salary_range}
-                              </span>
+                              <span className="text-xs text-[oklch(0.72_0.18_155)]">{job.salary_range}</span>
                             )}
                           </div>
                           {m.tailor_suggestions && (
@@ -696,11 +628,7 @@ function Jobs() {
                           onApplied={handleApplied}
                         />
                         {job?.url ? (
-                          <a
-                            href={job.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                          >
+                          <a href={job.url} target="_blank" rel="noopener noreferrer">
                             <Button variant="ghost" size="sm">
                               <ExternalLink className="h-3.5 w-3.5" />
                             </Button>
@@ -723,43 +651,42 @@ function Jobs() {
                 <EmptyState
                   icon={<Search className="h-8 w-8 text-muted-foreground" />}
                   title="No jobs scanned yet"
-                  desc="The scanner runs when the autonomous agent is active, or use the Scrape Job URL button above to add one manually."
+                  desc="Click 'Scan Jobs for Me' above — we'll search using your CV if you don't enter a keyword."
                 />
               ) : (
                 <div className="divide-y divide-border">
-                  <div className="grid grid-cols-[1fr_140px_100px_40px] bg-card/40 px-5 py-2.5 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                  <div className="grid grid-cols-[1fr_140px_120px_100px_40px] bg-card/40 px-5 py-2.5 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
                     <div>Job Title</div>
                     <div>Company</div>
+                    <div>Location</div>
                     <div>Found</div>
                     <div />
                   </div>
                   {(jobs as ScrapedJob[]).map((j) => (
                     <div
                       key={j.id}
-                      className="grid grid-cols-[1fr_140px_100px_40px] items-center gap-3 px-5 py-3.5 hover:bg-muted/20 transition-colors"
+                      className="grid grid-cols-[1fr_140px_120px_100px_40px] items-center gap-3 px-5 py-3.5 hover:bg-muted/20 transition-colors"
                     >
                       <div>
                         <div className="text-sm font-medium">{j.job_title}</div>
                         {j.salary_range && (
-                          <div className="text-xs text-[oklch(0.72_0.18_155)]">
-                            {j.salary_range}
-                          </div>
+                          <div className="text-xs text-[oklch(0.72_0.18_155)]">{j.salary_range}</div>
                         )}
                       </div>
                       <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
                         <Building2 className="h-3.5 w-3.5 shrink-0" />
                         {j.company}
                       </span>
+                      <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <MapPin className="h-3 w-3 shrink-0" />
+                        {j.location ?? "—"}
+                      </span>
                       <span className="flex items-center gap-1 text-xs text-muted-foreground">
                         <Calendar className="h-3 w-3" />
                         {relTime(j.created_at)}
                       </span>
                       {j.url ? (
-                        <a
-                          href={j.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
+                        <a href={j.url} target="_blank" rel="noopener noreferrer">
                           <Button variant="ghost" size="sm">
                             <ExternalLink className="h-3.5 w-3.5" />
                           </Button>
@@ -779,20 +706,10 @@ function Jobs() {
   );
 }
 
-function EmptyState({
-  icon,
-  title,
-  desc,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  desc: string;
-}) {
+function EmptyState({ icon, title, desc }: { icon: React.ReactNode; title: string; desc: string }) {
   return (
     <div className="flex flex-col items-center justify-center gap-4 p-16 text-center">
-      <div className="grid h-16 w-16 place-items-center rounded-2xl bg-muted">
-        {icon}
-      </div>
+      <div className="grid h-16 w-16 place-items-center rounded-2xl bg-muted">{icon}</div>
       <div>
         <h3 className="font-semibold">{title}</h3>
         <p className="mt-1 max-w-sm text-sm text-muted-foreground">{desc}</p>
