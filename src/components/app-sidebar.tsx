@@ -6,6 +6,7 @@ import {
   SidebarGroupLabel, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar,
 } from "@/components/ui/sidebar";
 import { Badge } from "@/components/ui/badge";
+import { TrialStatusBadge } from "@/components/trial-status-badge";
 import { toast } from "sonner";
 
 const items = [
@@ -36,6 +37,11 @@ export function AppSidebar() {
           </div>
           {!collapsed && <span className="font-semibold tracking-tight">VentureApply</span>}
         </div>
+        {!collapsed && (
+          <div className="px-2 pb-1.5">
+            <TrialStatusBadge compact showUpgradeCta />
+          </div>
+        )}
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
