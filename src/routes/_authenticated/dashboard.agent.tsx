@@ -287,17 +287,18 @@ function Agent() {
 const AGENT_PHASES = [
   {
     delay: 0,
-    text: "\u{1F916} Phase 1: Analyzing Greenhouse/Lever ATS form schema...",
+    text: "\u{1F916} Phase 1: Analyzing target application form schema...",
   },
   {
     delay: 1200,
-    text: "\u{1F9E0} Phase 2: Utilizing Gemini to inject matching skill keywords safely into CV layout...",
+    text: "\u{1F9E0} Phase 2: Using AI to align CV keywords with the role...",
   },
   {
     delay: 2400,
     text: "\u{1F680} Phase 3: Packaging secure background application payload...",
   },
 ];
+
 
 function AgentRunner() {
   const router = useRouter();
