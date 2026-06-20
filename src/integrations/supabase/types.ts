@@ -205,9 +205,12 @@ export type Database = {
           notification_preference: string | null
           onboarded: boolean
           phone_number: string | null
+          search_urgency: string | null
           target_title: string | null
           telegram_chat_id: string | null
           telegram_handle: string | null
+          trial_ends_at: string | null
+          trial_tier: string | null
           updated_at: string
         }
         Insert: {
@@ -220,9 +223,12 @@ export type Database = {
           notification_preference?: string | null
           onboarded?: boolean
           phone_number?: string | null
+          search_urgency?: string | null
           target_title?: string | null
           telegram_chat_id?: string | null
           telegram_handle?: string | null
+          trial_ends_at?: string | null
+          trial_tier?: string | null
           updated_at?: string
         }
         Update: {
@@ -235,9 +241,12 @@ export type Database = {
           notification_preference?: string | null
           onboarded?: boolean
           phone_number?: string | null
+          search_urgency?: string | null
           target_title?: string | null
           telegram_chat_id?: string | null
           telegram_handle?: string | null
+          trial_ends_at?: string | null
+          trial_tier?: string | null
           updated_at?: string
         }
         Relationships: []
@@ -249,7 +258,9 @@ export type Database = {
           id: string
           job_description: string | null
           job_title: string
+          location: string | null
           salary_range: string | null
+          source: string | null
           url: string | null
         }
         Insert: {
@@ -258,7 +269,9 @@ export type Database = {
           id?: string
           job_description?: string | null
           job_title: string
+          location?: string | null
           salary_range?: string | null
+          source?: string | null
           url?: string | null
         }
         Update: {
@@ -267,7 +280,9 @@ export type Database = {
           id?: string
           job_description?: string | null
           job_title?: string
+          location?: string | null
           salary_range?: string | null
+          source?: string | null
           url?: string | null
         }
         Relationships: []
