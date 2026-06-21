@@ -3,7 +3,7 @@
  * Handles job alerts via Email, Telegram, and WhatsApp
  */
 
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "8791693766:AAFELIDnqUDAAt4tBVmEuJ6z4hog6DkF_X4";
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
 interface JobAlert {
   title: string;
@@ -26,6 +26,11 @@ interface UserNotificationPrefs {
  * Send Telegram message via bot API
  */
 export async function sendTelegramMessage(chatId: string, message: string): Promise<boolean> {
+  if (!TELEGRAM_BOT_TOKEN) {
+    console.error("Telegram bot token not configured. Set TELEGRAM_BOT_TOKEN environment variable.");
+    return false;
+  }
+
   try {
     const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
       method: "POST",
