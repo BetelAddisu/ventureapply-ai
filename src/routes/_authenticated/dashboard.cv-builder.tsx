@@ -9,6 +9,13 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -24,10 +31,13 @@ import {
   FileUp,
   Download,
   X,
+  LayoutTemplate,
 } from "lucide-react";
 import { toast } from "sonner";
 import { parseCV, listCVs } from "@/lib/cv.functions";
 import { useCVCache } from "@/hooks/use-cv-cache";
+import { CVRenderer, cvBuilderToResumeData } from "@/components/cv-templates";
+import type { TemplateId } from "@/components/cv-templates";
 
 export const Route = createFileRoute("/_authenticated/dashboard/cv-builder")({
   component: CVBuilder,
@@ -65,6 +75,7 @@ function CVBuilder() {
   const [title, setTitle] = useState("My Resume");
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState("profile");
+  const [templateId, setTemplateId] = useState<TemplateId>("minimalist");
 
   // Import-from-file modal state
   const [importOpen, setImportOpen] = useState(false);
@@ -549,9 +560,19 @@ function CVBuilder() {
         <Card id="cv-preview" className="glass overflow-y-auto border-border">
           {/* Preview toolbar */}
           <div className="no-print flex items-center justify-between border-b border-border px-6 py-3">
-            <span className="text-xs uppercase tracking-widest text-muted-foreground">
-              Preview
-            </span>
+            <div className="flex items-center gap-2">
+              <LayoutTemplate className="h-4 w-4 text-muted-foreground" />
+              <Select value={templateId} onValueChange={(v) => setTemplateId(v as TemplateId)}>
+                <SelectTrigger className="w-[140px] h-8 text-xs">
+                  <SelectValue placeholder="Select template" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="minimalist">Minimalist</SelectItem>
+                  <SelectItem value="creative">Creative</SelectItem>
+                  <SelectItem value="executive">Executive</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             <div className="flex items-center gap-2">
               <Link to="/dashboard/tailor">
                 <Button
@@ -575,77 +596,9 @@ function CVBuilder() {
             </div>
           </div>
 
-          <div className="p-8">
-            <div className="mx-auto max-w-2xl">
-              <h1 className="text-3xl font-bold">
-                {cv.profile.name || "Your Name"}
-              </h1>
-              <p className="text-primary">{cv.profile.title || "Your Title"}</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {cv.profile.email} {cv.profile.phone && `• ${cv.profile.phone}`}
-              </p>
-              {cv.profile.summary && (
-                <p className="mt-4 text-sm leading-relaxed text-foreground/90">
-                  {cv.profile.summary}
-                </p>
-              )}
-
-              <Section title="Experience">
-                {cv.experiences
-                  .filter((e) => e.role || e.company)
-                  .map((e, i) => (
-                    <div key={i} className="mb-4">
-                      <div className="flex justify-between">
-                        <span className="font-medium">
-                          {e.role}{" "}
-                          <span className="text-muted-foreground">
-                            · {e.company}
-                          </span>
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          {e.period}
-                        </span>
-                      </div>
-                      <p className="mt-1 whitespace-pre-line text-sm text-foreground/80">
-                        {e.bullets}
-                      </p>
-                    </div>
-                  ))}
-              </Section>
-
-              <Section title="Education">
-                {cv.education
-                  .filter((e) => e.degree || e.school)
-                  .map((e, i) => (
-                    <div key={i} className="mb-2 flex justify-between text-sm">
-                      <span>
-                        <span className="font-medium">{e.degree}</span> ·{" "}
-                        {e.school}
-                      </span>
-                      <span className="text-muted-foreground">{e.year}</span>
-                    </div>
-                  ))}
-              </Section>
-
-              {cv.skills && (
-                <Section title="Skills">
-                  <div className="flex flex-wrap gap-1.5">
-                    {cv.skills
-                      .split(",")
-                      .map((s) => s.trim())
-                      .filter(Boolean)
-                      .map((s) => (
-                        <span
-                          key={s}
-                          className="rounded-md border border-border bg-card/60 px-2 py-0.5 text-xs"
-                        >
-                          {s}
-                        </span>
-                      ))}
-                  </div>
-                </Section>
-              )}
-            </div>
+          {/* CV Theme Preview */}
+          <div className="p-4">
+            <CVRenderer templateId={templateId} resumeData={cvBuilderToResumeData(cv)} />
           </div>
         </Card>
       </div>
