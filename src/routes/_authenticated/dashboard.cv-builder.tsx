@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { parseCV, listCVs } from "@/lib/cv.functions";
+import { useCVCache } from "@/hooks/use-cv-cache";
 
 export const Route = createFileRoute("/_authenticated/dashboard/cv-builder")({
   component: CVBuilder,
@@ -75,8 +76,20 @@ function CVBuilder() {
   const parseFn = useServerFn(parseCV);
   const listFn = useServerFn(listCVs);
 
+  // Use CV cache for persistent parsed data
+  const { cachedCV, cachedTitle, isLoading: cacheLoading, saveToCache, getCacheAge, hasValidCache } = useCVCache();
+
+  // Load saved CV on mount - prioritize cache, then Supabase
   useEffect(() => {
     (async () => {
+      // First check if we have cached data from a recent parse
+      if (hasValidCache && cachedCV) {
+        setCV(cachedCV);
+        setTitle(cachedTitle);
+        return;
+      }
+
+      // Otherwise load from Supabase
       const {
         data: { user },
       } = await supabase.auth.getUser();
@@ -94,7 +107,7 @@ function CVBuilder() {
         if (raw?.profile) setCV(raw as CV);
       }
     })();
-  }, []);
+  }, [cachedCV, cachedTitle, hasValidCache]);
 
   const save = async () => {
     setSaving(true);
@@ -181,12 +194,14 @@ function CVBuilder() {
     try {
       const parsed = await parseFn({ data: { raw_text: extractedText } });
       setCV(parsed as CV);
+      // Save to cache for persistence
+      await saveToCache(parsed as CV, title);
       setExtractedText("");
       setImportOpen(false);
       toast.success("CV imported — review the fields then Save.");
       setActiveTab("profile");
     } catch (e: any) {
-      toast.error(e.message ?? "Parsing failed");
+      toast.error(e.message ?? "Parsing failed — please try again.");
     } finally {
       setParsing(false);
     }
@@ -212,7 +227,7 @@ function CVBuilder() {
             </DialogTitle>
             <DialogDescription>
               Upload a <strong>.pdf</strong> or <strong>.txt</strong> file. Text
-              is extracted in your browser and then Gemini will structure it
+              is extracted in your browser and then AI will structure it
               into your CV fields.
             </DialogDescription>
           </DialogHeader>
@@ -281,7 +296,7 @@ function CVBuilder() {
                 {parsing ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Parsing with Gemini…
+                    Parsing with AI…
                   </>
                 ) : (
                   <>
