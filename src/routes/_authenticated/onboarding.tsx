@@ -135,11 +135,36 @@ function Onboarding() {
   const [experienceLevel, setExperienceLevel] = useState("");
   const [searchUrgency, setSearchUrgency] = useState("");
 
-  const next = () => setStep((s) => Math.min(s + 1, STEPS.length - 1));
+  // Validation for each step
+  const isStep0Valid = fullName.trim().length > 0;
+  const isStep1Valid = experienceLevel !== "";
+  const isStep2Valid = searchUrgency !== "";
+  // Step 3 (Plan) is informational only - always valid
+  const isCurrentStepValid = [
+    isStep0Valid,
+    isStep1Valid,
+    isStep2Valid,
+    true, // Plan step is always valid (informational)
+  ][step];
+
+  const next = () => {
+    if (!isCurrentStepValid) {
+      // Show validation message
+      if (step === 0) toast.error("Please enter your full name to continue");
+      else if (step === 1) toast.error("Please select your experience level");
+      else if (step === 2) toast.error("Please select your search urgency");
+      return;
+    }
+    setStep((s) => Math.min(s + 1, STEPS.length - 1));
+  };
   const back = () => setStep((s) => Math.max(s - 1, 0));
 
   const finish = async () => {
-    if (!fullName.trim()) return toast.error("Please enter your name");
+    // Final validation - should never fail if UI is working correctly
+    if (!isStep0Valid || !isStep1Valid || !isStep2Valid) {
+      toast.error("Please complete all required steps before launching");
+      return;
+    }
     setSaving(true);
     try {
       await saveFn({
@@ -181,16 +206,17 @@ function Onboarding() {
                 <p className="mt-1 text-sm text-muted-foreground">This helps our AI tailor your applications more accurately.</p>
               </div>
               <div className="space-y-1">
-                <Label>Full name</Label>
+                <Label>Full name <span className="text-destructive">*</span></Label>
                 <div className="relative">
                   <User className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
-                    className="pl-9"
+                    className={`pl-9 ${!isStep0Valid && fullName.length > 0 ? 'border-destructive' : ''}`}
                     placeholder="Betel Asfaw"
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
                   />
                 </div>
+                <p className="text-xs text-muted-foreground">Required — used for your CV and cover letters.</p>
               </div>
               <div className="space-y-1">
                 <Label>Target job title(s)</Label>
@@ -212,7 +238,7 @@ function Onboarding() {
           {step === 1 && (
             <div className="space-y-5">
               <div>
-                <h2 className="text-xl font-bold">What's your experience level?</h2>
+                <h2 className="text-xl font-bold">What's your experience level? <span className="text-destructive">*</span></h2>
                 <p className="mt-1 text-sm text-muted-foreground">This calibrates the language and tone of your tailored CVs.</p>
               </div>
               <div className="grid gap-2">
@@ -245,7 +271,7 @@ function Onboarding() {
           {step === 2 && (
             <div className="space-y-5">
               <div>
-                <h2 className="text-xl font-bold">How urgently are you looking?</h2>
+                <h2 className="text-xl font-bold">How urgently are you looking? <span className="text-destructive">*</span></h2>
                 <p className="mt-1 text-sm text-muted-foreground">
                   This feeds the autonomous agent's matching criteria — active seekers get higher scan frequency.
                 </p>
@@ -344,7 +370,7 @@ function Onboarding() {
             {step < STEPS.length - 1 ? (
               <Button
                 onClick={next}
-                disabled={step === 0 && !fullName.trim()}
+                disabled={!isCurrentStepValid}
                 className="bg-gradient-to-r from-primary to-[oklch(0.70_0.20_295)] text-primary-foreground border-0 glow"
               >
                 Continue <ChevronRight className="ml-1 h-4 w-4" />
@@ -352,7 +378,7 @@ function Onboarding() {
             ) : (
               <Button
                 onClick={finish}
-                disabled={saving}
+                disabled={saving || !isStep0Valid || !isStep1Valid || !isStep2Valid}
                 className="bg-gradient-to-r from-primary to-[oklch(0.70_0.20_295)] text-primary-foreground border-0 glow"
               >
                 {saving
@@ -364,7 +390,7 @@ function Onboarding() {
         </Card>
 
         <p className="mt-4 text-center text-xs text-muted-foreground">
-          You can update all of these from your profile settings at any time.
+          You can update all of these from your profile settings at any time. Fields marked with <span className="text-destructive">*</span> are required.
         </p>
       </div>
     </div>

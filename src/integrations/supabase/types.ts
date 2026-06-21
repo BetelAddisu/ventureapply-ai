@@ -152,6 +152,7 @@ export type Database = {
       job_matches: {
         Row: {
           created_at: string
+          cv_id: string | null
           id: string
           job_id: string
           match_score: number
@@ -161,6 +162,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          cv_id?: string | null
           id?: string
           job_id: string
           match_score?: number
@@ -170,6 +172,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          cv_id?: string | null
           id?: string
           job_id?: string
           match_score?: number
@@ -262,6 +265,8 @@ export type Database = {
           salary_range: string | null
           source: string | null
           url: string | null
+          search_query: string | null
+          searched_by_user_id: string | null
         }
         Insert: {
           company: string
@@ -273,6 +278,8 @@ export type Database = {
           salary_range?: string | null
           source?: string | null
           url?: string | null
+          search_query?: string | null
+          searched_by_user_id?: string | null
         }
         Update: {
           company?: string
@@ -284,6 +291,8 @@ export type Database = {
           salary_range?: string | null
           source?: string | null
           url?: string | null
+          search_query?: string | null
+          searched_by_user_id?: string | null
         }
         Relationships: []
       }
@@ -292,7 +301,15 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      expire_trial_if_needed: {
+        Args: {
+          p_user_id: string
+        }
+        Returns: {
+          current_tier: string
+          trial_ends_at: string | null
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never

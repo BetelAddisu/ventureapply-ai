@@ -55,7 +55,7 @@ const listScrapedJobs = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const { data, error } = await context.supabase
       .from("scraped_jobs")
-      .select("id, job_title, company, url, salary_range, location, created_at, search_query")
+      .select("id, job_title, company, url, salary_range, location, created_at, search_query, source, searched_by_user_id")
       .order("created_at", { ascending: false })
       .limit(50);
     if (error) throw new Error(error.message);
@@ -67,7 +67,7 @@ const listMyScannedJobs = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const { data, error } = await context.supabase
       .from("scraped_jobs")
-      .select("id, job_title, company, url, salary_range, location, created_at, search_query")
+      .select("id, job_title, company, url, salary_range, location, created_at, search_query, source, searched_by_user_id")
       .eq("searched_by_user_id", context.userId)
       .order("created_at", { ascending: false })
       .limit(50);
@@ -188,6 +188,8 @@ type ScrapedJob = {
   location: string | null;
   created_at: string;
   search_query: string | null;
+  source: string | null;
+  searched_by_user_id: string | null;
 };
 
 type JobMatch = {

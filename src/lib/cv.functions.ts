@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { callAIText } from "@/lib/ai.router";
 
 type Experience = {
   role: string;
@@ -21,38 +22,6 @@ type CV = {
   skills: string;
 };
 
-async function callGemini(
-  prompt: string,
-  systemInstruction: string,
-): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey)
-    throw new Error("GEMINI_API_KEY is not configured on the server.");
-
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: systemInstruction }] },
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.4, maxOutputTokens: 2048 },
-      }),
-    },
-  );
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Gemini API error: ${err}`);
-  }
-
-  const json = await res.json();
-  const text: string = json?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-  if (!text) throw new Error("Gemini returned an empty response.");
-  return text;
-}
-
 // ─── Tailor CV ───────────────────────────────────────────────────────────────
 
 export const tailorCV = createServerFn({ method: "POST" })
@@ -71,7 +40,7 @@ export const tailorCV = createServerFn({ method: "POST" })
 
     const cv = cvRow.raw_json_data as CV;
 
-    // 2. Call Gemini
+    // 2. Call AI with fallback routing
     const systemInstruction = `You are a senior technical recruiter and CV specialist.
 Your task is to tailor a candidate's CV to match a specific job description.
 Rules:
@@ -89,7 +58,7 @@ Rules:
 
     const prompt = `JOB DESCRIPTION:\n${data.job_description}\n\nORIGINAL CV (JSON):\n${JSON.stringify(cv, null, 2)}`;
 
-    const raw = await callGemini(prompt, systemInstruction);
+    const raw = await callAIText(prompt, systemInstruction, { temperature: 0.4, maxOutputTokens: 2048 });
 
     // 3. Parse JSON (strip any accidental markdown fences)
     const clean = raw
@@ -101,7 +70,7 @@ Rules:
     try {
       parsed = JSON.parse(clean);
     } catch {
-      throw new Error("Gemini returned invalid JSON. Please try again.");
+      throw new Error("AI returned invalid JSON. Please try again.");
     }
 
     // 4. Save as new CV row
@@ -148,7 +117,7 @@ Rules:
 - summary: write a 2-3 sentence professional summary based on the candidate's experience if none is present`;
 
     const prompt = `Parse this CV:\n\n${data.raw_text}`;
-    const raw = await callGemini(prompt, systemInstruction);
+    const raw = await callAIText(prompt, systemInstruction, { maxOutputTokens: 2048 });
 
     const clean = raw
       .replace(/^```json\s*/i, "")

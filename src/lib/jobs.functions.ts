@@ -96,6 +96,25 @@ async function searchJobicyFallback(query: string): Promise<NormalizedJob[]> {
   }
 }
 
+// ─── Deduplication helper ─────────────────────────────────────────────────────
+function deduplicateJobs(jobs: NormalizedJob[]): NormalizedJob[] {
+  const seen = new Set<string>();
+  return jobs.filter((job) => {
+    // Create a unique key based on URL (most reliable) or title+company combination
+    const urlKey = job.url?.toLowerCase().trim() ?? "";
+    const titleCompanyKey = `${job.job_title.toLowerCase().trim()}|${job.company.toLowerCase().trim()}`;
+    
+    // Prefer jobs with URLs over those without
+    if (urlKey) {
+      if (seen.has(urlKey)) return false;
+      seen.add(urlKey);
+    }
+    if (seen.has(titleCompanyKey)) return false;
+    seen.add(titleCompanyKey);
+    return true;
+  });
+}
+
 // ─── Fetch Jobs ─────────────────────────────────────────────────────────────
 export const fetchJobs = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -118,17 +137,43 @@ export const fetchJobs = createServerFn({ method: "POST" })
       usedCvFallback = true;
     }
 
-    let jobs: NormalizedJob[] = process.env.SERPAPI_KEY
-      ? await searchSerpApiJobs(query, locationType)
-      : await searchJobicyFallback(query);
+    // Fetch from BOTH sources in parallel for maximum coverage
+    const [serpApiJobs, jobicyJobs] = await Promise.allSettled([
+      searchSerpApiJobs(query, locationType),
+      searchJobicyFallback(query),
+    ]);
 
+    // Combine and deduplicate results from both sources
+    let jobs: NormalizedJob[] = [];
+    
+    if (serpApiJobs.status === "fulfilled") {
+      jobs = [...serpApiJobs.value];
+    }
+    
+    if (jobicyJobs.status === "fulfilled") {
+      jobs = [...jobs, ...jobicyJobs.value];
+    }
+
+    // Deduplicate across both sources
+    jobs = deduplicateJobs(jobs);
+
+    // If combined results are empty, try fallback query from CV
     if (jobs.length === 0 && !usedCvFallback) {
       const profile = await extractSearchProfileFromCV();
       if (profile) {
         const fallbackQuery = [profile.primary_title, ...profile.keywords.slice(0, 2)].join(" ");
-        jobs = process.env.SERPAPI_KEY
-          ? await searchSerpApiJobs(fallbackQuery, locationType)
-          : await searchJobicyFallback(fallbackQuery);
+        const [fallbackSerpJobs, fallbackJobicyJobs] = await Promise.allSettled([
+          searchSerpApiJobs(fallbackQuery, locationType),
+          searchJobicyFallback(fallbackQuery),
+        ]);
+
+        if (fallbackSerpJobs.status === "fulfilled") {
+          jobs = [...fallbackSerpJobs.value];
+        }
+        if (fallbackJobicyJobs.status === "fulfilled") {
+          jobs = [...jobs, ...fallbackJobicyJobs.value];
+        }
+        jobs = deduplicateJobs(jobs);
         usedCvFallback = jobs.length > 0;
       }
     }
@@ -152,7 +197,7 @@ export const fetchJobs = createServerFn({ method: "POST" })
       location: j.location,
       source: j.source,
       search_query: query,
-      searched_by_user_id: context.userId,   // ← NEW
+      searched_by_user_id: context.userId,
     }));
 
     const { data: upserted, error } = await context.supabase
