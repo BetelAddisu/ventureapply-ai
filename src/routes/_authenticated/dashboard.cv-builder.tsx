@@ -220,12 +220,6 @@ function CVBuilder() {
 
   // ── Export as PDF using html2canvas + jspdf ─────────────────────────────────
   const handleExport = async () => {
-    const previewEl = document.getElementById("cv-render-area");
-    if (!previewEl) {
-      toast.error("Could not find CV preview to export.");
-      return;
-    }
-
     toast.info("Generating PDF…");
     
     try {
@@ -236,31 +230,59 @@ function CVBuilder() {
       const resumeData = cvBuilderToResumeData(cv);
       const cleanHTML = buildCleanHTML(resumeData, templateId);
 
-      // Create an off-screen container with clean HTML
-      const container = document.createElement("div");
-      container.innerHTML = cleanHTML;
-      container.style.cssText = `
+      // Create an isolated iframe to avoid any CSS inheritance
+      const iframe = document.createElement("iframe");
+      iframe.style.cssText = `
         position: absolute;
         left: -9999px;
         top: 0;
         width: 794px;
-        background: #ffffff;
-        padding: 40px;
-        font-family: system-ui, -apple-system, sans-serif;
+        height: 1123px;
+        border: none;
       `;
-      document.body.appendChild(container);
+      document.body.appendChild(iframe);
 
-      // Wait for fonts to load
-      await new Promise(resolve => setTimeout(resolve, 200));
+      // Get iframe document and write clean content
+      const iframeDoc = iframe.contentWindow?.document;
+      if (!iframeDoc) throw new Error("Could not access iframe document");
 
-      const canvas = await html2canvas(container, {
+      // Write complete HTML document with inline styles
+      iframeDoc.open();
+      iframeDoc.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            html, body { 
+              width: 794px; 
+              height: 1123px; 
+              background: #ffffff; 
+              font-family: Arial, Helvetica, sans-serif;
+            }
+          </style>
+        </head>
+        <body>${cleanHTML}</body>
+        </html>
+      `);
+      iframeDoc.close();
+
+      // Wait for content to render
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      // Capture just the body
+      const canvas = await html2canvas(iframeDoc.body, {
         scale: 2,
         backgroundColor: "#ffffff",
-        useCORS: true,
+        width: 794,
+        height: 1123,
         logging: false,
+        useCORS: true,
+        allowTaint: true,
       });
 
-      document.body.removeChild(container);
+      document.body.removeChild(iframe);
 
       const imgData = canvas.toDataURL("image/png");
       const pdf = new jsPDF({
