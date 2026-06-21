@@ -198,6 +198,23 @@
    and render only the #cv-preview panel full-width on white paper.
    ─────────────────────────────────────────────────────────────────────────── */
 @media print {
+  /* Hide navigation, headers, sidebars, and theme switchers by default */
+  nav,
+  header,
+  aside,
+  .sidebar,
+  .nav,
+  .navbar,
+  .no-print,
+  button:not(#cv-preview button),
+  .btn,
+  .theme-switcher,
+  .template-selector,
+  [data-print-hide="true"] {
+    display: none !important;
+    visibility: hidden !important;
+  }
+
   /* Hide everything by default */
   body * {
     visibility: hidden !important;
@@ -209,11 +226,6 @@
     visibility: visible !important;
   }
 
-  /* Hide the toolbar row inside the preview (Export & Tailor buttons) */
-  #cv-preview .no-print {
-    display: none !important;
-  }
-
   /* Position the preview to fill the whole page */
   #cv-preview {
     position: fixed !important;
@@ -221,6 +233,8 @@
     width: 100vw !important;
     height: auto !important;
     overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
 
     /* Reset glass / dark-mode styles for clean white paper */
     background: #ffffff !important;
@@ -228,22 +242,22 @@
     border: none !important;
     box-shadow: none !important;
     border-radius: 0 !important;
-
-    /* Comfortable print margins */
-    padding: 2cm 2.5cm !important;
   }
 
   /* Force text to black for print */
   #cv-preview h1,
   #cv-preview h2,
+  #cv-preview h3,
   #cv-preview p,
   #cv-preview span,
-  #cv-preview div {
+  #cv-preview div,
+  #cv-preview li {
     color: #111111 !important;
   }
 
   /* Skills badges: simple border instead of glassmorphism */
-  #cv-preview span.rounded-md {
+  #cv-preview span.rounded-md,
+  #cv-preview span.rounded {
     border: 1px solid #cccccc !important;
     background: transparent !important;
   }
@@ -256,6 +270,21 @@
   /* Remove page breaks mid-section */
   #cv-preview section {
     page-break-inside: avoid;
+  }
+
+  /* Ensure CV themes render correctly in print */
+  #cv-preview .minimalist-cv,
+  #cv-preview .creative-cv,
+  #cv-preview .executive-cv {
+    background: #ffffff !important;
+    color: #111111 !important;
+  }
+
+  /* Creative theme sidebar - ensure it's visible in print */
+  #cv-preview .creative-cv aside {
+    background: #1e293b !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 
   @page {
