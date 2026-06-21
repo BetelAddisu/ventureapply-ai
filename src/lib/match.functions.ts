@@ -144,7 +144,7 @@ export const matchJobsToCV = createServerFn({ method: "POST" })
     }
 
     // 3. Score each candidate job with bounded concurrency, stopping early
-    // (gracefully) if the daily Gemini quota gets hit mid-batch.
+    // (gracefully) if the daily AI quota gets hit mid-batch.
     const { results: scores, quotaHit } = await runWithConcurrency(candidates, CONCURRENCY, (job) =>
       scoreOneJob(cvText, job.job_title, job.job_description ?? ""),
     );

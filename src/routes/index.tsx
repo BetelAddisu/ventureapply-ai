@@ -44,7 +44,7 @@ const FEATURES = [
   {
     icon: Sparkles,
     title: "AI Tailor Engine",
-    desc: "Gemini rewrites your CV to mirror any job description in seconds.",
+    desc: "AI rewrites your CV to mirror any job description in seconds.",
   },
   {
     icon: Search,
@@ -158,7 +158,7 @@ function Index() {
         <section className="text-center">
           <div className="mx-auto mb-6 inline-flex items-center gap-2 rounded-full border border-border bg-card/50 px-3 py-1 text-xs text-muted-foreground backdrop-blur">
             <Sparkles className="h-3 w-3 text-primary" />
-            Autonomous job application engine — powered by Gemini AI
+            Autonomous job application engine — powered by AI
           </div>
           <h1 className="mx-auto max-w-3xl text-5xl font-bold tracking-tight md:text-6xl">
             Apply to jobs at{" "}

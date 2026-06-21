@@ -64,7 +64,7 @@ function Tailor() {
       setResult(res);
       toast.success("CV tailored! A new version has been saved.");
     } catch (e: any) {
-      toast.error(e.message ?? "Tailoring failed — check your Gemini API key.");
+      toast.error(e.message ?? "Tailoring failed — please try again.");
     } finally {
       setTailoring(false);
     }
@@ -80,7 +80,7 @@ function Tailor() {
       <div>
         <h1 className="text-2xl font-semibold">AI Tailor Engine</h1>
         <p className="text-sm text-muted-foreground">
-          Paste a job description — Gemini rewrites your summary and bullet points to match the role's keywords while keeping every fact accurate.
+          Paste a job description — our AI rewrites your summary and bullet points to match the role's keywords while keeping every fact accurate.
         </p>
       </div>
 
@@ -126,7 +126,7 @@ function Tailor() {
             className="bg-gradient-to-r from-primary to-[oklch(0.70_0.20_295)] text-primary-foreground border-0 glow"
           >
             {tailoring
-              ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Tailoring with Gemini…</>
+              ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Tailoring with AI…</>
               : <><Sparkles className="mr-2 h-4 w-4" />Generate tailored CV</>}
           </Button>
         </div>
@@ -137,7 +137,7 @@ function Tailor() {
         <Card className="glass border-border p-5">
           <div className="flex items-center gap-3 mb-4">
             <Loader2 className="h-5 w-5 animate-spin text-primary" />
-            <p className="text-sm font-medium">Gemini is analyzing the job description and rewriting your CV…</p>
+            <p className="text-sm font-medium">AI is analyzing the job description and rewriting your CV…</p>
           </div>
           <div className="space-y-2">
             {[90, 75, 60, 85].map((w, i) => (

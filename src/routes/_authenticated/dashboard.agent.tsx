@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import { useState, useCallback, useEffect } from "react";
 import { matchJobsToCV } from "@/lib/match.functions";
+import { fetchJobs } from "@/lib/jobs.functions";
 import { supabase } from "@/integrations/supabase/client";
 
 // ─── Types ─────────────────────────────────────────────────────────────────
@@ -99,10 +100,8 @@ export const Route = createFileRoute("/_authenticated/dashboard/agent")({
 
 function ScanJobsPanel({ onSuccess }: { onSuccess: () => void }) {
   const [scanning, setScanning] = useState(false);
-  const scanJobsFn = useServerFn(async ({ data }: { data: { target_role?: string; location_type?: string } }) => {
-    const { fetchJobs } = await import("@/lib/jobs.functions");
-    return fetchJobs({ data: { target_role: data.target_role, location_type: data.location_type as any } });
-  });
+  // Pass fetchJobs directly to useServerFn for proper hash registration
+  const scanJobsFn = useServerFn(fetchJobs);
 
   const handleScan = useCallback(async () => {
     setScanning(true);
