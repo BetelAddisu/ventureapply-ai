@@ -262,12 +262,9 @@ function ScanJobsPanel({ onSuccess }: { onSuccess: () => void }) {
       const result = await fetchJobsFn({
         data: { target_role: keyword.trim() || undefined, location_type: locationType },
       });
-      if (result.inserted > 0) {
-        toast.success(result.message);
-        onSuccess();
-      } else {
-        toast.info(result.message);
-      }
+      // Always refresh the job list - show results regardless of new vs existing
+      toast.success(result.message);
+      onSuccess();
     } catch (e: any) {
       toast.error(e.message ?? "Scan failed — please try again.");
     } finally {

@@ -137,42 +137,48 @@ export const fetchJobs = createServerFn({ method: "POST" })
       usedCvFallback = true;
     }
 
-    // Fetch from BOTH sources in parallel for maximum coverage
-    const [serpApiJobs, jobicyJobs] = await Promise.allSettled([
-      searchSerpApiJobs(query, locationType),
-      searchJobicyFallback(query),
-    ]);
-
-    // Combine and deduplicate results from both sources
-    let jobs: NormalizedJob[] = [];
+    // PRIMARY: Try SerpAPI first (Google Jobs engine)
+    let serpApiJobs = await searchSerpApiJobs(query, locationType);
     
-    if (serpApiJobs.status === "fulfilled") {
-      jobs = [...serpApiJobs.value];
-    }
-    
-    if (jobicyJobs.status === "fulfilled") {
-      jobs = [...jobs, ...jobicyJobs.value];
+    // FALLBACK: If SerpAPI returns no results, try Jobicy
+    let jobicyJobs: NormalizedJob[] = [];
+    if (serpApiJobs.length === 0) {
+      console.log("[fetchJobs] SerpAPI returned no results, trying Jobicy fallback...");
+      jobicyJobs = await searchJobicyFallback(query);
     }
 
-    // Deduplicate across both sources
-    jobs = deduplicateJobs(jobs);
+    // Combine results: SerpAPI first, then any new Jobicy results
+    let jobs: NormalizedJob[] = [...serpApiJobs];
+    
+    // Add Jobicy results only if they add new unique jobs
+    const existingUrls = new Set(serpApiJobs.map(j => j.url?.toLowerCase()));
+    const existingKeys = new Set(serpApiJobs.map(j => `${j.job_title}|${j.company}`.toLowerCase()));
+    
+    for (const job of jobicyJobs) {
+      const urlKey = job.url?.toLowerCase();
+      const key = `${job.job_title}|${job.company}`.toLowerCase();
+      if ((urlKey && !existingUrls.has(urlKey)) || !existingKeys.has(key)) {
+        jobs.push(job);
+        if (urlKey) existingUrls.add(urlKey);
+        existingKeys.add(key);
+      }
+    }
 
     // If combined results are empty, try fallback query from CV
     if (jobs.length === 0 && !usedCvFallback) {
       const profile = await extractSearchProfileFromCV();
       if (profile) {
         const fallbackQuery = [profile.primary_title, ...profile.keywords.slice(0, 2)].join(" ");
-        const [fallbackSerpJobs, fallbackJobicyJobs] = await Promise.allSettled([
-          searchSerpApiJobs(fallbackQuery, locationType),
-          searchJobicyFallback(fallbackQuery),
-        ]);
-
-        if (fallbackSerpJobs.status === "fulfilled") {
-          jobs = [...fallbackSerpJobs.value];
+        
+        // Try SerpAPI with fallback query first
+        serpApiJobs = await searchSerpApiJobs(fallbackQuery, locationType);
+        
+        // Try Jobicy if SerpAPI still returns nothing
+        if (serpApiJobs.length === 0) {
+          jobicyJobs = await searchJobicyFallback(fallbackQuery);
         }
-        if (fallbackJobicyJobs.status === "fulfilled") {
-          jobs = [...jobs, ...fallbackJobicyJobs.value];
-        }
+        
+        jobs = [...serpApiJobs, ...jobicyJobs];
         jobs = deduplicateJobs(jobs);
         usedCvFallback = jobs.length > 0;
       }
@@ -219,11 +225,12 @@ export const fetchJobs = createServerFn({ method: "POST" })
 
     return {
       inserted: savedCount,
+      total_found: rows.length,
       message:
         savedCount === 0
-          ? `Found ${rows.length} job${rows.length === 1 ? "" : "s"} for "${query}", but all of them were already in the feed.`
+          ? `Found ${rows.length} job${rows.length === 1 ? "" : "s"} for "${query}" — refreshing your feed now.`
           : skippedCount > 0
-            ? `Added ${savedCount} new job${savedCount === 1 ? "" : "s"} for "${query}" (${skippedCount} were already in the feed).`
+            ? `Added ${savedCount} new job${savedCount === 1 ? "" : "s"} for "${query}".`
             : usedCvFallback
               ? `Found ${savedCount} jobs based on your CV profile ("${query}").`
               : `Found and saved ${savedCount} jobs for "${query}".`,
