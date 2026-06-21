@@ -7,7 +7,7 @@ import {
 } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { createServerFn } from "@tanstack/react-start";
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -46,6 +46,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { scrapeJob, autoApply, fetchJobs } from "@/lib/jobs.functions";
+import { matchJobsToCV } from "@/lib/match.functions"; // NEW
 
 // ─── Server functions ──────────────────────────────────────────────────────────
 
@@ -54,7 +55,7 @@ const listScrapedJobs = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const { data, error } = await context.supabase
       .from("scraped_jobs")
-      .select("id, job_title, company, url, salary_range, location, created_at")
+      .select("id, job_title, company, url, salary_range, location, created_at, search_query") // added search_query
       .order("created_at", { ascending: false })
       .limit(50);
     if (error) throw new Error(error.message);
@@ -168,6 +169,7 @@ type ScrapedJob = {
   salary_range: string | null;
   location: string | null;
   created_at: string;
+  search_query: string | null; // NEW
 };
 
 type JobMatch = {
@@ -226,9 +228,7 @@ function ScoreBadge({ score }: { score: number }) {
   );
 }
 
-// ─── Scan Jobs for Me — primary, single-click flow ─────────────────────────
-// Default behavior: works with ZERO input (falls back to the user's CV
-// server-side). Keyword + location are optional refinements, not gates.
+// ─── Scan Jobs for Me ─────────────────────────────────────────────────────────
 
 function ScanJobsPanel({ onSuccess }: { onSuccess: () => void }) {
   const [keyword, setKeyword] = useState("");
@@ -312,7 +312,100 @@ function ScanJobsPanel({ onSuccess }: { onSuccess: () => void }) {
   );
 }
 
-// ─── Scrape Job Modal — secondary, optional manual path ────────────────────
+// ─── MatchPanel (NEW) ──────────────────────────────────────────────────────
+
+function MatchPanel({
+  cvs,
+  onSuccess,
+}: {
+  cvs: CVOption[];
+  onSuccess: () => void;
+}) {
+  const [cvId, setCvId] = useState(cvs[0]?.id ?? "");
+  const [matching, setMatching] = useState(false);
+  const matchFn = useServerFn(matchJobsToCV);
+
+  const handleMatch = async () => {
+    if (!cvId) {
+      toast.error(
+        "Select a CV first — build one in the CV Builder if you haven't."
+      );
+      return;
+    }
+    setMatching(true);
+    try {
+      const result = await matchFn({ data: { cv_id: cvId } });
+      if (result.scored > 0) {
+        toast.success(result.message);
+        onSuccess();
+      } else {
+        toast.info(result.message);
+      }
+    } catch (e: any) {
+      toast.error(e.message ?? "Matching failed — please try again.");
+    } finally {
+      setMatching(false);
+    }
+  };
+
+  if (cvs.length === 0) {
+    return (
+      <Card className="glass border-border p-5">
+        <p className="text-sm text-muted-foreground">
+          Build a CV in the{" "}
+          <a href="/dashboard/cv-builder" className="text-primary underline">
+            CV Builder
+          </a>{" "}
+          first, then come back here to find your matches.
+        </p>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="glass border-border p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold">Find My Matches</h2>
+          <p className="text-xs text-muted-foreground">
+            Score scanned jobs against a CV using AI. Already-scored jobs are skipped.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Select value={cvId} onValueChange={setCvId} disabled={matching}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="Select a CV…" />
+            </SelectTrigger>
+            <SelectContent>
+              {cvs.map((c) => (
+                <SelectItem key={c.id} value={c.id}>
+                  {c.title}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            onClick={handleMatch}
+            disabled={matching || !cvId}
+            className="bg-gradient-to-r from-primary to-[oklch(0.70_0.20_295)] text-primary-foreground border-0"
+          >
+            {matching ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Matching…
+              </>
+            ) : (
+              <>
+                <Sparkles className="mr-2 h-4 w-4" /> Find My Matches
+              </>
+            )}
+          </Button>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+// ─── Scrape Job Modal ──────────────────────────────────────────────────────
 
 function ScrapeModal({
   open,
@@ -482,9 +575,26 @@ function Jobs() {
   const toggle = (channel: "email" | "telegram" | "whatsapp") =>
     prefsMutation.mutate({ ...prefs, [channel]: !prefs[channel] });
 
-  const handleScanSuccess = () => {
+  // ── Auto-match after scan ──────────────────────────────────────────────
+  const matchFn = useServerFn(matchJobsToCV);
+
+  const handleScanSuccess = useCallback(async () => {
     queryClient.invalidateQueries({ queryKey: ["scraped-jobs"] });
-  };
+    // Auto-match against the user's most recently updated CV, if any.
+    const defaultCvId = (cvs as CVOption[])[0]?.id;
+    if (defaultCvId) {
+      try {
+        await matchFn({ data: { cv_id: defaultCvId } });
+        queryClient.invalidateQueries({ queryKey: ["job-matches"] });
+      } catch {
+        // Non-critical — user can always click "Find My Matches" manually.
+      }
+    }
+  }, [cvs, matchFn, queryClient]);
+
+  const handleMatchSuccess = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ["job-matches"] });
+  }, [queryClient]);
 
   const handleApplied = (matchId: string) => {
     setAppliedMatchIds((prev) => new Set([...prev, matchId]));
@@ -511,6 +621,9 @@ function Jobs() {
 
         {/* Primary action: Scan Jobs for Me */}
         <ScanJobsPanel onSuccess={handleScanSuccess} />
+
+        {/* NEW: MatchPanel */}
+        <MatchPanel cvs={cvs as CVOption[]} onSuccess={handleMatchSuccess} />
 
         {/* Secondary, low-emphasis manual option */}
         <button
@@ -561,7 +674,7 @@ function Jobs() {
               )}
             </TabsTrigger>
             <TabsTrigger value="all">
-              <Search className="mr-2 h-3.5 w-3.5" /> All Scanned Jobs
+              <Search className="mr-2 h-3.5 w-3.5" /> Discover {/* relabeled */}
             </TabsTrigger>
           </TabsList>
 
@@ -644,14 +757,18 @@ function Jobs() {
             </Card>
           </TabsContent>
 
-          {/* All Jobs */}
+          {/* All Jobs — now "Discover" */}
           <TabsContent value="all">
+            <div className="mb-2 text-xs text-muted-foreground">
+              A shared feed of postings found across everyone's searches — not just yours. Some won't match your
+              profession; that's expected. Use "Find My Matches" above to see what's actually relevant to you.
+            </div>
             <Card className="glass overflow-hidden border-border">
               {(jobs as ScrapedJob[]).length === 0 ? (
                 <EmptyState
                   icon={<Search className="h-8 w-8 text-muted-foreground" />}
-                  title="No jobs scanned yet"
-                  desc="Click 'Scan Jobs for Me' above — we'll search using your CV if you don't enter a keyword."
+                  title="Nothing in the feed yet"
+                  desc="Be the first — click 'Scan Jobs for Me' above. Your results join a shared feed everyone can browse."
                 />
               ) : (
                 <div className="divide-y divide-border">
@@ -671,6 +788,11 @@ function Jobs() {
                         <div className="text-sm font-medium">{j.job_title}</div>
                         {j.salary_range && (
                           <div className="text-xs text-[oklch(0.72_0.18_155)]">{j.salary_range}</div>
+                        )}
+                        {j.search_query && (
+                          <div className="text-[10px] text-muted-foreground/70">
+                            found via: "{j.search_query}"
+                          </div>
                         )}
                       </div>
                       <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
