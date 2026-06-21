@@ -232,18 +232,49 @@ function CVBuilder() {
       const html2canvas = (await import("html2canvas")).default;
       const { jsPDF } = await import("jspdf");
 
-      // Temporarily set white background for clean capture
-      const originalBg = previewEl.style.background;
-      previewEl.style.background = "#ffffff";
+      // Clone the element to avoid modifying the live DOM
+      const clone = previewEl.cloneNode(true) as HTMLElement;
+      clone.style.cssText = `
+        position: absolute;
+        left: -9999px;
+        top: 0;
+        width: ${previewEl.offsetWidth}px;
+        background: #ffffff;
+        padding: 16px;
+      `;
       
-      const canvas = await html2canvas(previewEl, {
+      // Remove oklch colors from cloned elements
+      const allElements = clone.querySelectorAll("*");
+      allElements.forEach((el) => {
+        const htmlEl = el as HTMLElement;
+        const computedStyle = window.getComputedStyle(htmlEl);
+        
+        // Get and convert colors
+        const bgColor = computedStyle.backgroundColor;
+        const color = computedStyle.color;
+        const borderColor = computedStyle.borderColor;
+        
+        if (bgColor && bgColor !== "rgba(0, 0, 0, 0)" && bgColor !== "transparent") {
+          htmlEl.style.backgroundColor = bgColor;
+        }
+        if (color) {
+          htmlEl.style.color = color;
+        }
+        if (borderColor && borderColor !== "rgba(0, 0, 0, 0)" && borderColor !== "transparent") {
+          htmlEl.style.borderColor = borderColor;
+        }
+      });
+
+      document.body.appendChild(clone);
+      
+      const canvas = await html2canvas(clone, {
         scale: 2,
         useCORS: true,
         backgroundColor: "#ffffff",
         logging: false,
       });
 
-      previewEl.style.background = originalBg;
+      document.body.removeChild(clone);
 
       const imgData = canvas.toDataURL("image/png");
       const pdf = new jsPDF({
