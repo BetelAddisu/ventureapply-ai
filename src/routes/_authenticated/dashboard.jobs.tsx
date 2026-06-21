@@ -7,7 +7,7 @@ import {
 } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { createServerFn } from "@tanstack/react-start";
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -62,7 +62,6 @@ const listScrapedJobs = createServerFn({ method: "GET" })
     return (data ?? []) as unknown as ScrapedJob[];
   });
 
-// ─── NEW: private "Your Search" feed ──────────────────────────────────────
 const listMyScannedJobs = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
@@ -247,7 +246,7 @@ function ScoreBadge({ score }: { score: number }) {
   );
 }
 
-// ─── Scan Jobs for Me ─────────────────────────────────────────────────────────
+// ─── Scan Jobs for Me — primary, single-click flow ─────────────────────────
 
 function ScanJobsPanel({ onSuccess }: { onSuccess: () => void }) {
   const [keyword, setKeyword] = useState("");
@@ -331,26 +330,15 @@ function ScanJobsPanel({ onSuccess }: { onSuccess: () => void }) {
   );
 }
 
-// ─── MatchPanel ──────────────────────────────────────────────────────────────
+// ─── Find My Matches — score scanned jobs against a chosen CV ─────────────
 
-function MatchPanel({
-  cvs,
-  onSuccess,
-}: {
-  cvs: CVOption[];
-  onSuccess: () => void;
-}) {
+function MatchPanel({ cvs, onSuccess }: { cvs: CVOption[]; onSuccess: () => void }) {
   const [cvId, setCvId] = useState(cvs[0]?.id ?? "");
   const [matching, setMatching] = useState(false);
   const matchFn = useServerFn(matchJobsToCV);
 
   const handleMatch = async () => {
-    if (!cvId) {
-      toast.error(
-        "Select a CV first — build one in the CV Builder if you haven't."
-      );
-      return;
-    }
+    if (!cvId) return toast.error("Select a CV first — build one in the CV Builder if you haven't.");
     setMatching(true);
     try {
       const result = await matchFn({ data: { cv_id: cvId } });
@@ -424,7 +412,7 @@ function MatchPanel({
   );
 }
 
-// ─── Scrape Job Modal ──────────────────────────────────────────────────────
+// ─── Scrape Job Modal — secondary, optional manual path ────────────────────
 
 function ScrapeModal({
   open,
@@ -581,6 +569,8 @@ function Jobs() {
   const [scrapeOpen, setScrapeOpen] = useState(false);
   const [appliedMatchIds, setAppliedMatchIds] = useState<Set<string>>(new Set());
 
+  const matchFn = useServerFn(matchJobsToCV);
+
   const setPrefsFn = useServerFn(setNotifPrefs);
   const prefsMutation = useMutation({
     mutationFn: (next: { email: boolean; telegram: boolean; whatsapp: boolean }) =>
@@ -595,10 +585,9 @@ function Jobs() {
   const toggle = (channel: "email" | "telegram" | "whatsapp") =>
     prefsMutation.mutate({ ...prefs, [channel]: !prefs[channel] });
 
-  // ── Auto-match after scan ──────────────────────────────────────────────
-  const matchFn = useServerFn(matchJobsToCV);
-
-  const handleScanSuccess = useCallback(async () => {
+  // Auto-matches against the user's most recently updated CV after a
+  // successful scan, in addition to the manual "Find My Matches" button.
+  const handleScanSuccess = async () => {
     queryClient.invalidateQueries({ queryKey: ["scraped-jobs"] });
     queryClient.invalidateQueries({ queryKey: ["my-scanned-jobs"] });
     const defaultCvId = (cvs as CVOption[])[0]?.id;
@@ -610,11 +599,11 @@ function Jobs() {
         // Non-critical — user can always click "Find My Matches" manually.
       }
     }
-  }, [cvs, matchFn, queryClient]);
+  };
 
-  const handleMatchSuccess = useCallback(() => {
+  const handleMatchSuccess = () => {
     queryClient.invalidateQueries({ queryKey: ["job-matches"] });
-  }, [queryClient]);
+  };
 
   const handleApplied = (matchId: string) => {
     setAppliedMatchIds((prev) => new Set([...prev, matchId]));
@@ -642,7 +631,7 @@ function Jobs() {
         {/* Primary action: Scan Jobs for Me */}
         <ScanJobsPanel onSuccess={handleScanSuccess} />
 
-        {/* MatchPanel */}
+        {/* Score scanned jobs against a CV */}
         <MatchPanel cvs={cvs as CVOption[]} onSuccess={handleMatchSuccess} />
 
         {/* Secondary, low-emphasis manual option */}
@@ -682,7 +671,7 @@ function Jobs() {
           </div>
         </Card>
 
-        {/* ─── Tabs ────────────────────────────────────────────────────── */}
+        {/* Tabs */}
         <Tabs defaultValue="mine">
           <TabsList>
             <TabsTrigger value="mine">
@@ -706,8 +695,11 @@ function Jobs() {
             </TabsTrigger>
           </TabsList>
 
-          {/* ── Your Search (private) ── */}
+          {/* Your Search — private to this user */}
           <TabsContent value="mine">
+            <p className="mb-2 text-xs text-muted-foreground">
+              Jobs found by searches you've personally run. For the full shared pool, see "Discover."
+            </p>
             <Card className="glass overflow-hidden border-border">
               {(myJobs as ScrapedJob[]).length === 0 ? (
                 <EmptyState
@@ -733,11 +725,6 @@ function Jobs() {
                         <div className="text-sm font-medium">{j.job_title}</div>
                         {j.salary_range && (
                           <div className="text-xs text-[oklch(0.72_0.18_155)]">{j.salary_range}</div>
-                        )}
-                        {j.search_query && (
-                          <div className="text-[10px] text-muted-foreground/70">
-                            found via: "{j.search_query}"
-                          </div>
                         )}
                       </div>
                       <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
@@ -768,14 +755,14 @@ function Jobs() {
             </Card>
           </TabsContent>
 
-          {/* ── My Matches ── */}
+          {/* My Matches */}
           <TabsContent value="matches">
             <Card className="glass overflow-hidden border-border">
               {(matches as JobMatch[]).length === 0 ? (
                 <EmptyState
                   icon={<TrendingUp className="h-8 w-8 text-muted-foreground" />}
                   title="No matches yet"
-                  desc="Click 'Scan Jobs for Me' above to get started — no keyword required."
+                  desc="Click 'Scan Jobs for Me' or 'Find My Matches' above to get started."
                 />
               ) : (
                 <div className="divide-y divide-border">
@@ -847,12 +834,13 @@ function Jobs() {
             </Card>
           </TabsContent>
 
-          {/* ── Discover (shared feed) ── */}
+          {/* Discover — shared feed across everyone's searches */}
           <TabsContent value="all">
-            <div className="mb-2 text-xs text-muted-foreground">
-              A shared feed of postings found across everyone's searches — not just yours. Some won't match your
-              profession; that's expected. Use "Find My Matches" above to see what's actually relevant to you.
-            </div>
+            <p className="mb-2 text-xs text-muted-foreground">
+              A shared feed of postings found across everyone's searches — not just yours. Some won't match
+              your profession; that's expected. Use "Find My Matches" above to see what's actually relevant to
+              you.
+            </p>
             <Card className="glass overflow-hidden border-border">
               {(jobs as ScrapedJob[]).length === 0 ? (
                 <EmptyState
