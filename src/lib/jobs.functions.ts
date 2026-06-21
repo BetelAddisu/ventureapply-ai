@@ -15,10 +15,6 @@ type NormalizedJob = {
 };
 
 // ─── SerpAPI (Google Jobs) — primary multi-source aggregator ──────────────
-// Free tier: 100 searches/month. One search returns results pooled from
-// LinkedIn, Indeed, Google Jobs listings, and direct company postings —
-// SerpAPI does the cross-platform aggregation for us rather than us
-// scraping each site individually (which is fragile and ToS-risky).
 async function searchSerpApiJobs(
   query: string,
   locationType: LocationType,
@@ -58,7 +54,6 @@ async function searchSerpApiJobs(
       const detected = (r.detected_extensions?.schedule_type ?? "").toLowerCase();
       if (locationType === "remote") return loc.includes("remote") || /work from home/.test(loc);
       if (locationType === "hybrid") return loc.includes("hybrid");
-      // onsite: anything not explicitly remote/hybrid
       return !loc.includes("remote") && !loc.includes("hybrid");
     })
     .map((r) => ({
@@ -72,9 +67,7 @@ async function searchSerpApiJobs(
     }));
 }
 
-// ─── Public no-key fallback (Jobicy) — used if SERPAPI_KEY isn't set ──────
-// Kept as a backstop so the feature still works before you've added a
-// SerpAPI key, rather than failing outright.
+// ─── Public no-key fallback (Jobicy) ──────────────────────────────────────
 async function searchJobicyFallback(query: string): Promise<NormalizedJob[]> {
   const apiUrl = `https://jobicy.com/api/v2/remote-jobs?count=20&tag=${encodeURIComponent(query)}`;
   try {
@@ -104,9 +97,6 @@ async function searchJobicyFallback(query: string): Promise<NormalizedJob[]> {
 }
 
 // ─── Fetch Jobs ─────────────────────────────────────────────────────────────
-// Accepts an optional target_role and location_type. If target_role is
-// empty (or a search with it returns zero results), falls back to a
-// CV-derived search profile so "no jobs found" stops being a dead end.
 export const fetchJobs = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(
@@ -132,8 +122,6 @@ export const fetchJobs = createServerFn({ method: "POST" })
       ? await searchSerpApiJobs(query, locationType)
       : await searchJobicyFallback(query);
 
-    // If the primary search came back empty and we weren't already using
-    // the CV fallback, retry once with a CV-derived query before giving up.
     if (jobs.length === 0 && !usedCvFallback) {
       const profile = await extractSearchProfileFromCV();
       if (profile) {
@@ -163,6 +151,7 @@ export const fetchJobs = createServerFn({ method: "POST" })
       salary_range: j.salary_range,
       location: j.location,
       source: j.source,
+      search_query: query, // ← store the query that found this job
     }));
 
     const { error } = await context.supabase.from("scraped_jobs").insert(rows);
@@ -185,10 +174,7 @@ export const fetchJobs = createServerFn({ method: "POST" })
     };
   });
 
-// ─── Scrape Job (manual URL — now a secondary/optional path) ──────────────
-// Unchanged in behavior. The UI no longer requires this as the primary
-// flow (see dashboard.jobs.tsx), but the capability stays available for
-// users who want to add a specific posting manually.
+// ─── Scrape Job (manual URL) ──────────────────────────────────────────────
 export const scrapeJob = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: { url: string }) => d)
@@ -250,6 +236,7 @@ export const scrapeJob = createServerFn({ method: "POST" })
         company,
         job_description: jobDescription,
         source: "manual",
+        search_query: null, // manual entries have no search query
       })
       .select("id, job_title, company, url")
       .single();
@@ -268,12 +255,7 @@ export const scrapeJob = createServerFn({ method: "POST" })
     };
   });
 
-// ─── ATS detection — internal engine identifiers, real names preserved
-//     in user-facing records (see decision in chat) ────────────────────────
-// Internally we refer to these as engine types so future ATS additions
-// don't require renaming a growing if/else chain. The *actual* platform
-// name is still what gets written to job_applications/agent_logs, because
-// that's the user's own factual record of where their application went.
+// ─── ATS detection ─────────────────────────────────────────────────────────
 type ATSEngineType = "ATS_Engine_Type_A" | "ATS_Engine_Type_B" | "unsupported";
 
 function detectAtsEngine(url: string): { engine: ATSEngineType; displayName: string } {
@@ -282,7 +264,7 @@ function detectAtsEngine(url: string): { engine: ATSEngineType; displayName: str
   return { engine: "unsupported", displayName: "Custom portal" };
 }
 
-// ─── Auto-Apply MVP ───────────────────────────────────────────────────────
+// ─── Auto-Apply MVP ────────────────────────────────────────────────────────
 export const autoApply = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: { cv_id: string; job_id: string }) => d)
