@@ -2,6 +2,108 @@
 
 An AI-powered job application platform that helps you build professional resumes, discover opportunities across multiple job boards, and streamline your application workflow.
 
+## Architecture Overview
+
+```mermaid
+graph TB
+    subgraph Frontend["🌐 Frontend (React + TypeScript)"]
+        CVBuilder["🎨 CV Builder<br/>Interactive Editor"]
+        JobTracker["🔍 Job Tracker<br/>Discovery & Matching"]
+        ResumeVault["📊 Resume Vault<br/>Multi-Resume Storage"]
+        Settings["⚙️ Settings<br/>Profile & Notifications"]
+        AgentCommand["🤖 Agent Command<br/>AI Automation"]
+    end
+
+    subgraph Routing["🧭 TanStack Router"]
+        RouteTree["Route Tree<br/>Type-Safe Routes"]
+    end
+
+    subgraph Backend["⚡ Nitro Server Functions"]
+        JobsAPI["📡 Job Search API<br/>fetchJobs, matchJobs"]
+        CVAPI["📝 CV Processing API<br/>parseCV, listCVs"]
+        AuthAPI["🔐 Authentication<br/>requireSupabaseAuth"]
+    end
+
+    subgraph Database["🗄️ Supabase (PostgreSQL)"]
+        Auth["👤 Auth<br/>User Management"]
+        Profiles["👤 Profiles<br/>User Settings"]
+        CVs["📄 CVs<br/>Resume Storage"]
+        Jobs["💼 Scraped Jobs<br/>Job Listings"]
+        Applications["📬 Applications<br/>Job Tracking"]
+        AgentLogs["📜 Agent Logs<br/>Activity History"]
+    end
+
+    subgraph ExternalAPIs["🔌 External Services"]
+        SerpAPI["🔎 SerpAPI<br/>Google Jobs Engine"]
+        Jobicy["🌐 Jobicy<br/>Remote Jobs API"]
+        Telegram["📱 Telegram Bot<br/>@VentureApply_AIBot"]
+        Email["📧 Email Service<br/>Resend/SendGrid"]
+    end
+
+    subgraph AIProviders["🤖 AI Providers"]
+        Gemini["✨ Gemini<br/>Primary Model"]
+        Groq["⚡ Groq<br/>Fast Fallback"]
+        OpenRouter["🌐 OpenRouter<br/>Multi-Provider"]
+    end
+
+    %% Connections
+    Frontend --> Routing
+    Routing --> Backend
+    Backend --> Database
+    Backend --> ExternalAPIs
+    Backend --> AIProviders
+    
+    CVBuilder --> CVAPI
+    CVBuilder --> JobsAPI
+    JobTracker --> JobsAPI
+    JobTracker --> Database
+    ResumeVault --> Database
+    Settings --> Profiles
+    Settings --> Telegram
+    AgentCommand --> AIProviders
+    AgentCommand --> AgentLogs
+```
+
+## Data Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Frontend
+    participant Server
+    participant Database
+    participant ExternalAPI
+
+    User->>Frontend: Create/Edit Resume
+    Frontend->>Server: Save CV (upsert)
+    Server->>Database: Insert/Update CV
+    Database-->>Server: Confirmation
+    Server-->>Frontend: Success Toast
+
+    User->>Frontend: Search Jobs
+    Frontend->>Server: fetchJobs(query)
+    Server->>SerpAPI: Search Google Jobs
+    Server->>Jobicy: Search Remote Jobs
+    SerpAPI-->>Server: Job Results
+    Jobicy-->>Server: Job Results
+    Server->>Server: Deduplicate & Merge
+    Server->>Database: Store Jobs
+    Database-->>Server: Saved Jobs
+    Server-->>Frontend: Job Feed
+
+    User->>Frontend: Match CV to Jobs
+    Frontend->>Server: matchJobs(cv_id)
+    Server->>AIProviders: Score with AI
+    AIProviders-->>Server: Match Scores
+    Server->>Database: Store Matches
+    Server-->>Frontend: Ranked Jobs
+
+    User->>Frontend: Enable Notifications
+    Frontend->>Database: Save Preferences
+    Database-->>Frontend: Preferences Saved
+    Server->>Telegram: Send Job Alert
+```
+
 ## Features
 
 ### 🎨 CV Builder
