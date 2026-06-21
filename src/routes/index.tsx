@@ -196,6 +196,45 @@ function Index() {
           </span>
         </div>
 
+        {/* ── Market Opportunity ── */}
+        <section className="mt-20">
+          <h2 className="mb-2 text-center text-2xl font-bold">
+            The Market Opportunity
+          </h2>
+          <p className="mb-8 text-center text-sm text-muted-foreground">
+            The global online recruitment market is booming — here's why automation matters now.
+          </p>
+          <div className="grid gap-5 md:grid-cols-4">
+            <div className="glass rounded-xl border-border p-5 text-center">
+              <div className="text-3xl font-bold text-primary">$45B+</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                Global online recruitment market size by 2027
+              </div>
+            </div>
+            <div className="glass rounded-xl border-border p-5 text-center">
+              <div className="text-3xl font-bold text-primary">25+</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                Avg applications received per corporate job offer
+                <span className="mt-0.5 block text-[10px] text-muted-foreground/60">(Source: Glassdoor)</span>
+              </div>
+            </div>
+            <div className="glass rounded-xl border-border p-5 text-center">
+              <div className="text-3xl font-bold text-primary">6hrs</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                Average time spent applying per week
+                <span className="mt-0.5 block text-[10px] text-muted-foreground/60">(LinkedIn Data)</span>
+              </div>
+            </div>
+            <div className="glass rounded-xl border-border p-5 text-center">
+              <div className="text-3xl font-bold text-primary">90%</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                Reduction in manual application overhead
+                <span className="mt-0.5 block text-[10px] text-muted-foreground/60">(Internal Testing)</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
         {/* ── Features ── */}
         <section id="features" className="mt-20 grid gap-5 md:grid-cols-3">
           {FEATURES.map(({ icon: Icon, title, desc }) => (
