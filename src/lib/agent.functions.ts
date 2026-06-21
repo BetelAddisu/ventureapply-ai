@@ -79,7 +79,7 @@ function detectAtsEngine(url: string): { engine: ATSEngineType; displayName: str
 export const runAgentSequence = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(
-    (d: { job_id: string; job_title: string; company: string; url: string }) =>
+    (d: { job_id: string | null; job_title: string; company: string; url: string }) =>
       d,
   )
   .handler(async ({ data, context }) => {
@@ -96,7 +96,7 @@ export const runAgentSequence = createServerFn({ method: "POST" })
       .from("job_applications")
       .insert({
         user_id: context.userId,
-        job_id,
+        job_id: job_id ?? null,
         title: job_title,
         company,
         url,
