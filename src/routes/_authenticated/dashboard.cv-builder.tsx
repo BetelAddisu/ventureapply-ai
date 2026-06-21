@@ -218,9 +218,59 @@ function CVBuilder() {
     }
   };
 
-  // ── Export as PDF (window.print with print CSS) ───────────────────────────
-  const handleExport = () => {
-    window.print();
+  // ── Export as PDF using html2canvas + jspdf ─────────────────────────────────
+  const handleExport = async () => {
+    const previewEl = document.getElementById("cv-render-area");
+    if (!previewEl) {
+      toast.error("Could not find CV preview to export.");
+      return;
+    }
+
+    toast.info("Generating PDF…");
+    
+    try {
+      const html2canvas = (await import("html2canvas")).default;
+      const { jsPDF } = await import("jspdf");
+
+      // Temporarily set white background for clean capture
+      const originalBg = previewEl.style.background;
+      previewEl.style.background = "#ffffff";
+      
+      const canvas = await html2canvas(previewEl, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: "#ffffff",
+        logging: false,
+      });
+
+      previewEl.style.background = originalBg;
+
+      const imgData = canvas.toDataURL("image/png");
+      const pdf = new jsPDF({
+        orientation: "portrait",
+        unit: "mm",
+        format: "a4",
+      });
+
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+      const imgWidth = canvas.width;
+      const imgHeight = canvas.height;
+      const ratio = Math.min(pdfWidth / imgWidth, pdfHeight / imgHeight);
+      const imgX = (pdfWidth - imgWidth * ratio) / 2;
+      const imgY = 0;
+
+      pdf.addImage(imgData, "PNG", imgX, imgY, imgWidth * ratio, imgHeight * ratio);
+      
+      // Generate filename from CV title
+      const filename = `${title.replace(/[^a-zA-Z0-9]/g, "_")}_CV.pdf`;
+      pdf.save(filename);
+      
+      toast.success("CV exported successfully!");
+    } catch (err: any) {
+      console.error("Export error:", err);
+      toast.error(`Export failed: ${err.message}`);
+    }
   };
 
   const updateProfile = (k: keyof CV["profile"], v: string) =>
@@ -597,7 +647,7 @@ function CVBuilder() {
           </div>
 
           {/* CV Theme Preview */}
-          <div className="p-4">
+          <div id="cv-render-area" className="p-4 bg-white">
             <CVRenderer templateId={templateId} resumeData={cvBuilderToResumeData(cv)} />
           </div>
         </Card>
