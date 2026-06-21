@@ -33,6 +33,7 @@ export const Route = createFileRoute("/_authenticated/dashboard/resumes")({
 function ResumeVault() {
   const [resumes, setResumes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [selectedResume, setSelectedResume] = useState<any | null>(null);
   const [previewTemplate, setPreviewTemplate] = useState<TemplateId>("minimalist");
   const [showPreview, setShowPreview] = useState(false);
@@ -42,22 +43,39 @@ function ResumeVault() {
   }, []);
 
   const fetchResumes = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setError("User not authenticated");
+        setLoading(false);
+        return;
+      }
 
-    const { data, error } = await supabase
-      .from("cvs")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("updated_at", { ascending: false });
+      const { data, error } = await supabase
+        .from("cvs")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("updated_at", { ascending: false });
 
-    if (error) {
+      if (error) throw error;
+      
+      // Normalize data with fallbacks for null/undefined values
+      const normalizedData = (data || []).map((cv: any) => ({
+        id: cv.id || crypto.randomUUID(),
+        title: cv.title || "Untitled Resume",
+        content: cv.content || cv.raw_json_data || {},
+        created_at: cv.created_at || new Date().toISOString(),
+        updated_at: cv.updated_at || new Date().toISOString(),
+      }));
+      
+      setResumes(normalizedData);
+    } catch (err: any) {
+      console.error("Failed to load resumes:", err);
+      setError(err.message || "Failed to load resumes");
       toast.error("Failed to load resumes");
-      console.error(error);
-    } else {
-      setResumes(data || []);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleDelete = async (id: string) => {
@@ -77,6 +95,11 @@ function ResumeVault() {
   };
 
   const handleExportPDF = async (resume: any) => {
+    if (!resume) {
+      toast.error("No resume selected");
+      return;
+    }
+
     const { jsPDF } = await import("jspdf");
     const { default: html2canvas } = await import("html2canvas");
 
@@ -84,7 +107,8 @@ function ResumeVault() {
 
     try {
       // Build clean HTML for the selected template
-      const cleanHTML = buildCleanHTMLForExport(resume.content, previewTemplate);
+      const cvContent = resume.content || resume.raw_json_data || {};
+      const cleanHTML = buildCleanHTMLForExport(cvContent, previewTemplate);
 
       // Create iframe for PDF generation
       const iframe = document.createElement("iframe");
@@ -146,6 +170,19 @@ function ResumeVault() {
     );
   }
 
+  if (error) {
+    return (
+      <div className="mx-auto max-w-6xl space-y-6">
+        <Card className="border-destructive/50 p-8 text-center">
+          <p className="text-destructive mb-4">{error}</p>
+          <Button variant="outline" onClick={fetchResumes}>
+            Try Again
+          </Button>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-6xl space-y-6">
       <div className="flex items-center justify-between">
@@ -186,9 +223,9 @@ function ResumeVault() {
                     <FileText className="h-5 w-5 text-primary" />
                   </div>
                   <div>
-                    <h3 className="font-medium">{resume.title}</h3>
+                    <h3 className="font-medium">{resume.title || "Untitled Resume"}</h3>
                     <p className="text-xs text-muted-foreground">
-                      Updated {new Date(resume.updated_at).toLocaleDateString()}
+                      Updated {resume.updated_at ? new Date(resume.updated_at).toLocaleDateString() : "Recently"}
                     </p>
                   </div>
                 </div>
