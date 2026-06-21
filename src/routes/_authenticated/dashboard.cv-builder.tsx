@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
@@ -73,11 +73,12 @@ const empty: CV = {
 function CVBuilder() {
   const [cv, setCV] = useState<CV>(empty);
   const [title, setTitle] = useState("My Resume");
-  const [titleDirty, setTitleDirty] = useState(false);
+  const [savedTitle, setSavedTitle] = useState("My Resume"); // Track what was last saved
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState("profile");
   const [templateId, setTemplateId] = useState<TemplateId>("minimalist");
   const titleSaveTimer = useRef<NodeJS.Timeout | null>(null);
+  const currentCVId = useRef<string | null>(null);
 
   // Import-from-file modal state
   const [importOpen, setImportOpen] = useState(false);
@@ -108,6 +109,7 @@ function CVBuilder() {
       if (hasValidCache && cachedCV) {
         setCV(cachedCV);
         setTitle(cachedTitle);
+        setSavedTitle(cachedTitle);
         return;
       }
 
@@ -124,7 +126,9 @@ function CVBuilder() {
         .limit(1)
         .maybeSingle();
       if (data) {
-        setTitle(data.title);
+        setTitle(data.title || "My Resume");
+        setSavedTitle(data.title || "My Resume");
+        currentCVId.current = data.id;
         const raw = data.raw_json_data as any;
         if (raw?.profile) setCV(raw as CV);
       }
@@ -140,14 +144,25 @@ function CVBuilder() {
       setSaving(false);
       return;
     }
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("cvs")
       .upsert(
         { user_id: user.id, title, raw_json_data: cv as any },
         { onConflict: "user_id,title" as any },
-      );
+      )
+      .select("id")
+      .maybeSingle();
     setSaving(false);
     if (error) return toast.error(error.message);
+    
+    // Store the CV ID after first save
+    if (!currentCVId.current && data?.id) {
+      currentCVId.current = data.id;
+    }
+    
+    // Update saved title
+    setSavedTitle(title);
+    
     toast.success("CV saved");
     // Refresh list silently
     try {
@@ -325,40 +340,43 @@ function CVBuilder() {
   const updateProfile = (k: keyof CV["profile"], v: string) =>
     setCV({ ...cv, profile: { ...cv.profile, [k]: v } });
 
-  // Debounced title save - saves 500ms after user stops typing
-  const handleTitleChange = useCallback((newTitle: string) => {
+  // Handle title change with debounced save
+  const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newTitle = e.target.value;
     setTitle(newTitle);
-    setTitleDirty(true);
-
+    
     // Clear existing timer
     if (titleSaveTimer.current) {
       clearTimeout(titleSaveTimer.current);
     }
 
-    // Set new timer for debounced save
-    titleSaveTimer.current = setTimeout(async () => {
-      await saveTitleToDb(newTitle);
-    }, 500);
-  }, [title]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Set new timer for debounced save (only if we have a CV ID)
+    if (currentCVId.current) {
+      titleSaveTimer.current = setTimeout(async () => {
+        await saveTitleToDb(newTitle);
+      }, 500);
+    }
+  };
 
-  // Save title to database
+  // Save title to database by ID
   const saveTitleToDb = async (titleToSave: string) => {
+    if (!currentCVId.current) return;
+    
     const {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return;
 
-    // Only save if title changed from last saved state
     const { error } = await supabase
       .from("cvs")
       .update({ title: titleToSave, updated_at: new Date().toISOString() })
-      .eq("user_id", user.id)
-      .ilike("title", title.replace(/[_\s]+$/, "")); // Match current title
+      .eq("id", currentCVId.current);
 
     if (error) {
       console.error("Failed to update title:", error);
+    } else {
+      setSavedTitle(titleToSave);
     }
-    setTitleDirty(false);
   };
 
   return (
@@ -469,20 +487,19 @@ function CVBuilder() {
             <div className="flex-1">
               <Input
                 value={title}
-                onChange={(e) => handleTitleChange(e.target.value)}
+                onChange={handleTitleChange}
                 onBlur={() => {
-                  // Save immediately on blur if there are pending changes
+                  // Save immediately on blur
                   if (titleSaveTimer.current) {
                     clearTimeout(titleSaveTimer.current);
+                  }
+                  if (currentCVId.current && title !== savedTitle) {
                     saveTitleToDb(title);
                   }
                 }}
                 className="border-0 bg-transparent text-lg font-semibold focus-visible:ring-0"
                 placeholder="Resume Name"
               />
-              {titleDirty && (
-                <span className="text-xs text-muted-foreground">Saving...</span>
-              )}
             </div>
             <div className="flex items-center gap-2">
               <Button
