@@ -203,14 +203,14 @@ function Pricing() {
               <Globe className="h-3 w-3 text-primary" />
               Market opportunity
             </div>
-            <h2 className="text-2xl font-bold">A $28B market, and growing</h2>
+            <h2 className="text-2xl font-bold">A $45B+ market, and growing</h2>
             <p className="mx-auto mt-3 max-w-lg text-sm text-muted-foreground">
-              The global online recruitment market is projected to reach $28B by 2027. The average job seeker sends
-              27 applications per role. VentureApply reduces that effort by 90%.
+              The global online recruitment market is projected to reach $45B+ by 2027. The average job seeker sends
+              25+ applications per role. VentureApply reduces that effort by 90%.
             </p>
             <div className="mt-8 grid gap-6 md:grid-cols-3">
               {[
-                { value: "27", label: "avg applications per job offer", sub: "Source: Glassdoor" },
+                { value: "25+", label: "avg applications per job offer", sub: "Source: Glassdoor" },
                 { value: "6hrs", label: "average time spent applying per week", sub: "Source: LinkedIn" },
                 { value: "90%", label: "reduction in application time with VentureApply", sub: "Based on internal testing" },
               ].map((s) => (
