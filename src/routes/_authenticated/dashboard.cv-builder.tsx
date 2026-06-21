@@ -229,52 +229,38 @@ function CVBuilder() {
     toast.info("Generating PDF…");
     
     try {
-      const html2canvas = (await import("html2canvas")).default;
       const { jsPDF } = await import("jspdf");
+      const { default: html2canvas } = await import("html2canvas");
 
-      // Clone the element to avoid modifying the live DOM
-      const clone = previewEl.cloneNode(true) as HTMLElement;
-      clone.style.cssText = `
+      // Build clean HTML with only hex/rgb colors
+      const resumeData = cvBuilderToResumeData(cv);
+      const cleanHTML = buildCleanHTML(resumeData, templateId);
+
+      // Create an off-screen container with clean HTML
+      const container = document.createElement("div");
+      container.innerHTML = cleanHTML;
+      container.style.cssText = `
         position: absolute;
         left: -9999px;
         top: 0;
-        width: ${previewEl.offsetWidth}px;
+        width: 794px;
         background: #ffffff;
-        padding: 16px;
+        padding: 40px;
+        font-family: system-ui, -apple-system, sans-serif;
       `;
-      
-      // Remove oklch colors from cloned elements
-      const allElements = clone.querySelectorAll("*");
-      allElements.forEach((el) => {
-        const htmlEl = el as HTMLElement;
-        const computedStyle = window.getComputedStyle(htmlEl);
-        
-        // Get and convert colors
-        const bgColor = computedStyle.backgroundColor;
-        const color = computedStyle.color;
-        const borderColor = computedStyle.borderColor;
-        
-        if (bgColor && bgColor !== "rgba(0, 0, 0, 0)" && bgColor !== "transparent") {
-          htmlEl.style.backgroundColor = bgColor;
-        }
-        if (color) {
-          htmlEl.style.color = color;
-        }
-        if (borderColor && borderColor !== "rgba(0, 0, 0, 0)" && borderColor !== "transparent") {
-          htmlEl.style.borderColor = borderColor;
-        }
-      });
+      document.body.appendChild(container);
 
-      document.body.appendChild(clone);
-      
-      const canvas = await html2canvas(clone, {
+      // Wait for fonts to load
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      const canvas = await html2canvas(container, {
         scale: 2,
-        useCORS: true,
         backgroundColor: "#ffffff",
+        useCORS: true,
         logging: false,
       });
 
-      document.body.removeChild(clone);
+      document.body.removeChild(container);
 
       const imgData = canvas.toDataURL("image/png");
       const pdf = new jsPDF({
@@ -293,7 +279,6 @@ function CVBuilder() {
 
       pdf.addImage(imgData, "PNG", imgX, imgY, imgWidth * ratio, imgHeight * ratio);
       
-      // Generate filename from CV title
       const filename = `${title.replace(/[^a-zA-Z0-9]/g, "_")}_CV.pdf`;
       pdf.save(filename);
       
@@ -719,4 +704,172 @@ function Section({
       {children}
     </section>
   );
+}
+
+// ── Clean HTML Generator for PDF Export ─────────────────────────────────────
+// Generates self-contained HTML with only hex/rgb colors to avoid oklch issues
+function buildCleanHTML(resumeData: ReturnType<typeof cvBuilderToResumeData>, templateId: TemplateId): string {
+  const { basics, work, education, skills } = resumeData;
+  const name = basics?.name || "Your Name";
+  const label = basics?.label || "";
+  const email = basics?.email || "";
+  const phone = basics?.phone || "";
+  const summary = basics?.summary || "";
+
+  if (templateId === "executive") {
+    return buildExecutiveHTML({ name, label, email, phone, summary, work: work || [], education: education || [], skills: skills || [] });
+  } else if (templateId === "creative") {
+    return buildCreativeHTML({ name, label, email, phone, summary, work: work || [], education: education || [], skills: skills || [] });
+  }
+  return buildMinimalistHTML({ name, label, email, phone, summary, work: work || [], education: education || [], skills: skills || [] });
+}
+
+function buildMinimalistHTML({ name, label, email, phone, summary, work, education, skills }: {
+  name: string; label: string; email: string; phone: string; summary: string;
+  work: any[]; education: any[]; skills: any[];
+}): string {
+  const workHTML = work.map(job => `
+    <div style="margin-bottom: 16px;">
+      <div style="display: flex; justify-content: space-between;">
+        <strong>${job.position || job.name || ""}</strong>
+        <span style="color: #666; font-size: 12px;">${job.startDate || ""}${job.endDate ? " – " + job.endDate : ""}</span>
+      </div>
+      <div style="color: #666; font-size: 13px;">${job.company || ""}</div>
+      ${job.highlights?.map((h: string) => `<li style="margin-left: 16px; color: #333; font-size: 13px;">${h}</li>`).join("") || ""}
+    </div>
+  `).join("");
+
+  const eduHTML = education.map(edu => `
+    <div style="margin-bottom: 12px;">
+      <div style="display: flex; justify-content: space-between;">
+        <strong>${edu.studyType || ""}${edu.area ? " in " + edu.area : ""}</strong>
+        <span style="color: #666; font-size: 12px;">${edu.endDate || ""}</span>
+      </div>
+      <div style="color: #666; font-size: 13px;">${edu.institution || ""}</div>
+    </div>
+  `).join("");
+
+  const skillsHTML = skills.map(s => `
+    <span style="display: inline-block; padding: 2px 8px; background: #f0f0f0; color: #333; font-size: 12px; border-radius: 4px; margin: 2px;">
+      ${typeof s === "string" ? s : s.name || ""}
+    </span>
+  `).join("");
+
+  return `
+    <div style="font-family: system-ui, sans-serif; font-size: 14px; color: #111; background: #fff; padding: 20px;">
+      <header style="border-bottom: 2px solid #111; padding-bottom: 16px; margin-bottom: 20px;">
+        <h1 style="font-size: 28px; font-weight: bold; margin: 0;">${name}</h1>
+        ${label ? `<p style="font-size: 16px; color: #444; margin: 4px 0;">${label}</p>` : ""}
+        <div style="font-size: 13px; color: #555; margin-top: 8px;">
+          ${email}${phone ? " • " + phone : ""}
+        </div>
+      </header>
+      ${summary ? `<section style="margin-bottom: 20px;"><h2 style="font-size: 11px; text-transform: uppercase; color: #666; border-bottom: 1px solid #ddd; padding-bottom: 4px;">Summary</h2><p style="color: #333; font-size: 13px; line-height: 1.5;">${summary}</p></section>` : ""}
+      ${workHTML ? `<section style="margin-bottom: 20px;"><h2 style="font-size: 11px; text-transform: uppercase; color: #666; border-bottom: 1px solid #ddd; padding-bottom: 4px;">Experience</h2>${workHTML}</section>` : ""}
+      ${eduHTML ? `<section style="margin-bottom: 20px;"><h2 style="font-size: 11px; text-transform: uppercase; color: #666; border-bottom: 1px solid #ddd; padding-bottom: 4px;">Education</h2>${eduHTML}</section>` : ""}
+      ${skillsHTML ? `<section><h2 style="font-size: 11px; text-transform: uppercase; color: #666; border-bottom: 1px solid #ddd; padding-bottom: 4px;">Skills</h2><div style="margin-top: 8px;">${skillsHTML}</div></section>` : ""}
+    </div>
+  `;
+}
+
+function buildCreativeHTML({ name, label, email, phone, summary, work, education, skills }: {
+  name: string; label: string; email: string; phone: string; summary: string;
+  work: any[]; education: any[]; skills: any[];
+}): string {
+  const skillsHTML = skills.map(s => `
+    <div style="margin-bottom: 12px;">
+      <div style="color: #fff; font-size: 13px; font-weight: 500;">${typeof s === "string" ? s : s.name || ""}</div>
+    </div>
+  `).join("");
+
+  const eduHTML = education.map(edu => `
+    <div style="margin-bottom: 12px;">
+      <div style="color: #fff; font-size: 13px; font-weight: 500;">${edu.studyType || ""}</div>
+      <div style="color: #94a3b8; font-size: 11px;">${edu.institution || ""}</div>
+      <div style="color: #64748b; font-size: 11px;">${edu.endDate || ""}</div>
+    </div>
+  `).join("");
+
+  const workHTML = work.map(job => `
+    <div style="margin-bottom: 16px;">
+      <div style="display: flex; justify-content: space-between;">
+        <strong style="color: #111;">${job.position || job.name || ""}</strong>
+        <span style="color: #666; font-size: 11px;">${job.startDate || ""}${job.endDate ? " – " + job.endDate : ""}</span>
+      </div>
+      <div style="color: #d97706; font-size: 13px; font-weight: 500;">${job.company || ""}</div>
+      ${job.highlights?.map((h: string) => `<div style="color: #333; font-size: 12px; padding-left: 12px; border-left: 2px solid #d97706; margin-top: 4px;">${h}</div>`).join("") || ""}
+    </div>
+  `).join("");
+
+  return `
+    <div style="display: flex; font-family: system-ui, sans-serif; background: #fff;">
+      <aside style="width: 200px; background: linear-gradient(to bottom, #1e293b, #0f172a); color: #fff; padding: 24px;">
+        <h1 style="font-size: 20px; font-weight: bold; margin: 0 0 4px 0;">${name}</h1>
+        ${label ? `<p style="font-size: 11px; color: #94a3b8; margin: 0;">${label}</p>` : ""}
+        <div style="margin-top: 20px;">
+          <h3 style="font-size: 10px; text-transform: uppercase; color: #64748b; border-bottom: 1px solid #334155; padding-bottom: 4px;">Contact</h3>
+          <div style="font-size: 11px; color: #cbd5e1; margin-top: 8px;">
+            ${email}<br>${phone}
+          </div>
+        </div>
+        ${skillsHTML ? `<div style="margin-top: 20px;"><h3 style="font-size: 10px; text-transform: uppercase; color: #64748b; border-bottom: 1px solid #334155; padding-bottom: 4px;">Skills</h3><div style="margin-top: 8px;">${skillsHTML}</div></div>` : ""}
+        ${eduHTML ? `<div style="margin-top: 20px;"><h3 style="font-size: 10px; text-transform: uppercase; color: #64748b; border-bottom: 1px solid #334155; padding-bottom: 4px;">Education</h3><div style="margin-top: 8px;">${eduHTML}</div></div>` : ""}
+      </aside>
+      <main style="flex: 1; padding: 24px;">
+        ${summary ? `<section style="margin-bottom: 20px;"><h2 style="font-size: 10px; text-transform: uppercase; color: #666; border-bottom: 2px solid #d97706; padding-bottom: 4px; display: inline-block;">Profile</h2><p style="color: #333; font-size: 12px; line-height: 1.5;">${summary}</p></section>` : ""}
+        ${workHTML ? `<section><h2 style="font-size: 10px; text-transform: uppercase; color: #666; border-bottom: 2px solid #d97706; padding-bottom: 4px; display: inline-block;">Experience</h2>${workHTML}</section>` : ""}
+      </main>
+    </div>
+  `;
+}
+
+function buildExecutiveHTML({ name, label, email, phone, summary, work, education, skills }: {
+  name: string; label: string; email: string; phone: string; summary: string;
+  work: any[]; education: any[]; skills: any[];
+}): string {
+  const workHTML = work.map(job => `
+    <div style="margin-bottom: 20px;">
+      <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #e5e5e5; padding-bottom: 8px; margin-bottom: 8px;">
+        <div>
+          <strong style="font-size: 15px;">${job.position || job.name || ""}</strong>
+          <em style="color: #666; font-size: 13px;"> - ${job.company || ""}</em>
+        </div>
+        <span style="color: #666; font-size: 12px;">${job.startDate || ""}${job.endDate ? " – " + job.endDate : ""}</span>
+      </div>
+      ${job.highlights?.map((h: string) => `<li style="color: #333; font-size: 12px; margin-left: 20px;">${h}</li>`).join("") || ""}
+    </div>
+  `).join("");
+
+  const eduHTML = education.map(edu => `
+    <div style="margin-bottom: 12px;">
+      <strong style="color: #111; font-size: 13px;">${edu.studyType || ""}${edu.area ? " in " + edu.area : ""}</strong>
+      <div style="color: #666; font-size: 12px; font-style: italic;">${edu.institution || ""}</div>
+      <div style="color: #888; font-size: 11px;">${edu.endDate || ""}</div>
+    </div>
+  `).join("");
+
+  const skillsHTML = skills.map(s => `
+    <div style="font-size: 12px; margin-bottom: 4px;">
+      <strong style="color: #111;">${typeof s === "string" ? s : s.name || ""}</strong>
+      ${s.keywords?.length ? `<div style="color: #666; font-size: 11px;">${s.keywords.join(" • ")}</div>` : ""}
+    </div>
+  `).join("");
+
+  return `
+    <div style="font-family: Georgia, serif; font-size: 14px; color: #222; background: #fff; padding: 30px;">
+      <header style="text-align: center; border-bottom: 2px solid #111; padding-bottom: 20px; margin-bottom: 24px;">
+        <h1 style="font-size: 32px; font-weight: bold; letter-spacing: 2px; margin: 0;">${name}</h1>
+        ${label ? `<p style="font-size: 16px; color: #555; font-style: italic; margin: 8px 0;">${label}</p>` : ""}
+        <div style="color: #555; font-size: 12px; margin-top: 12px;">
+          ${email}${phone ? " | " + phone : ""}
+        </div>
+      </header>
+      ${summary ? `<section style="text-align: center; margin-bottom: 24px;"><p style="color: #444; max-width: 600px; margin: 0 auto; line-height: 1.6; font-size: 13px;">${summary}</p></section>` : ""}
+      ${workHTML ? `<section style="margin-bottom: 24px;"><h2 style="font-size: 14px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; border-bottom: 2px solid #111; padding-bottom: 4px; margin-bottom: 16px;">Professional Experience</h2>${workHTML}</section>` : ""}
+      <div style="display: flex; gap: 30px;">
+        ${eduHTML ? `<section style="flex: 1;"><h2 style="font-size: 14px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; border-bottom: 2px solid #111; padding-bottom: 4px; margin-bottom: 12px;">Education</h2>${eduHTML}</section>` : ""}
+        ${skillsHTML ? `<section style="flex: 1;"><h2 style="font-size: 14px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; border-bottom: 2px solid #111; padding-bottom: 4px; margin-bottom: 12px;">Core Competencies</h2>${skillsHTML}</section>` : ""}
+      </div>
+    </div>
+  `;
 }
