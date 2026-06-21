@@ -1,5 +1,5 @@
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
-import { FileText, Sparkles, Search, Bot, LogOut, Zap, Settings } from "lucide-react";
+import { FileText, Sparkles, Search, Bot, LogOut, Zap, Settings, Home, FolderOpen } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent,
@@ -14,6 +14,7 @@ const items = [
   { title: "AI Tailor", url: "/dashboard/tailor", icon: Sparkles, tier: "Free" },
   { title: "Job Tracker", url: "/dashboard/jobs", icon: Search, tier: "Paid" },
   { title: "Agent Command", url: "/dashboard/agent", icon: Bot, tier: "Premium" },
+  { title: "Resume Vault", url: "/dashboard/resumes", icon: FolderOpen, tier: "Free" },
 ];
 
 export function AppSidebar() {
@@ -45,9 +46,23 @@ export function AppSidebar() {
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Workspace</SidebarGroupLabel>
+          <SidebarGroupLabel>Console</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
+              {/* Dashboard / Home Button */}
+              <SidebarMenuItem key="dashboard-home">
+                <SidebarMenuButton asChild isActive={path === "/dashboard" || path === "/dashboard/"}>
+                  <Link to="/dashboard" className="flex items-center gap-2">
+                    <Home className="h-4 w-4" />
+                    {!collapsed && (
+                      <>
+                        <span className="flex-1 font-medium">Dashboard</span>
+                        <Badge variant="outline" className="h-5 border-border/60 text-[10px] font-normal text-muted-foreground">Home</Badge>
+                      </>
+                    )}
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
               {items.map((item) => {
                 const active = path === item.url || path.startsWith(item.url + "/");
                 return (
@@ -74,7 +89,7 @@ export function AppSidebar() {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton asChild>
-              <Link to="/dashboard"><Settings className="h-4 w-4" />{!collapsed && <span>Settings</span>}</Link>
+              <Link to="/dashboard/settings"><Settings className="h-4 w-4" />{!collapsed && <span>Settings</span>}</Link>
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>

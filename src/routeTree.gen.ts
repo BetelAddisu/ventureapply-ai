@@ -17,6 +17,8 @@ import { Route as AuthenticatedOnboardingRouteImport } from './routes/_authentic
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authenticated/dashboard.index'
 import { Route as AuthenticatedDashboardTailorRouteImport } from './routes/_authenticated/dashboard.tailor'
+import { Route as AuthenticatedDashboardSettingsRouteImport } from './routes/_authenticated/dashboard.settings'
+import { Route as AuthenticatedDashboardResumesRouteImport } from './routes/_authenticated/dashboard.resumes'
 import { Route as AuthenticatedDashboardJobsRouteImport } from './routes/_authenticated/dashboard.jobs'
 import { Route as AuthenticatedDashboardCvBuilderRouteImport } from './routes/_authenticated/dashboard.cv-builder'
 import { Route as AuthenticatedDashboardAgentRouteImport } from './routes/_authenticated/dashboard.agent'
@@ -62,6 +64,18 @@ const AuthenticatedDashboardTailorRoute =
     path: '/tailor',
     getParentRoute: () => AuthenticatedDashboardRoute,
   } as any)
+const AuthenticatedDashboardSettingsRoute =
+  AuthenticatedDashboardSettingsRouteImport.update({
+    id: '/settings',
+    path: '/settings',
+    getParentRoute: () => AuthenticatedDashboardRoute,
+  } as any)
+const AuthenticatedDashboardResumesRoute =
+  AuthenticatedDashboardResumesRouteImport.update({
+    id: '/resumes',
+    path: '/resumes',
+    getParentRoute: () => AuthenticatedDashboardRoute,
+  } as any)
 const AuthenticatedDashboardJobsRoute =
   AuthenticatedDashboardJobsRouteImport.update({
     id: '/jobs',
@@ -90,6 +104,8 @@ export interface FileRoutesByFullPath {
   '/dashboard/agent': typeof AuthenticatedDashboardAgentRoute
   '/dashboard/cv-builder': typeof AuthenticatedDashboardCvBuilderRoute
   '/dashboard/jobs': typeof AuthenticatedDashboardJobsRoute
+  '/dashboard/resumes': typeof AuthenticatedDashboardResumesRoute
+  '/dashboard/settings': typeof AuthenticatedDashboardSettingsRoute
   '/dashboard/tailor': typeof AuthenticatedDashboardTailorRoute
   '/dashboard/': typeof AuthenticatedDashboardIndexRoute
 }
@@ -101,6 +117,8 @@ export interface FileRoutesByTo {
   '/dashboard/agent': typeof AuthenticatedDashboardAgentRoute
   '/dashboard/cv-builder': typeof AuthenticatedDashboardCvBuilderRoute
   '/dashboard/jobs': typeof AuthenticatedDashboardJobsRoute
+  '/dashboard/resumes': typeof AuthenticatedDashboardResumesRoute
+  '/dashboard/settings': typeof AuthenticatedDashboardSettingsRoute
   '/dashboard/tailor': typeof AuthenticatedDashboardTailorRoute
   '/dashboard': typeof AuthenticatedDashboardIndexRoute
 }
@@ -115,6 +133,8 @@ export interface FileRoutesById {
   '/_authenticated/dashboard/agent': typeof AuthenticatedDashboardAgentRoute
   '/_authenticated/dashboard/cv-builder': typeof AuthenticatedDashboardCvBuilderRoute
   '/_authenticated/dashboard/jobs': typeof AuthenticatedDashboardJobsRoute
+  '/_authenticated/dashboard/resumes': typeof AuthenticatedDashboardResumesRoute
+  '/_authenticated/dashboard/settings': typeof AuthenticatedDashboardSettingsRoute
   '/_authenticated/dashboard/tailor': typeof AuthenticatedDashboardTailorRoute
   '/_authenticated/dashboard/': typeof AuthenticatedDashboardIndexRoute
 }
@@ -129,6 +149,8 @@ export interface FileRouteTypes {
     | '/dashboard/agent'
     | '/dashboard/cv-builder'
     | '/dashboard/jobs'
+    | '/dashboard/resumes'
+    | '/dashboard/settings'
     | '/dashboard/tailor'
     | '/dashboard/'
   fileRoutesByTo: FileRoutesByTo
@@ -140,6 +162,8 @@ export interface FileRouteTypes {
     | '/dashboard/agent'
     | '/dashboard/cv-builder'
     | '/dashboard/jobs'
+    | '/dashboard/resumes'
+    | '/dashboard/settings'
     | '/dashboard/tailor'
     | '/dashboard'
   id:
@@ -153,6 +177,8 @@ export interface FileRouteTypes {
     | '/_authenticated/dashboard/agent'
     | '/_authenticated/dashboard/cv-builder'
     | '/_authenticated/dashboard/jobs'
+    | '/_authenticated/dashboard/resumes'
+    | '/_authenticated/dashboard/settings'
     | '/_authenticated/dashboard/tailor'
     | '/_authenticated/dashboard/'
   fileRoutesById: FileRoutesById
@@ -222,6 +248,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedDashboardTailorRouteImport
       parentRoute: typeof AuthenticatedDashboardRoute
     }
+    '/_authenticated/dashboard/settings': {
+      id: '/_authenticated/dashboard/settings'
+      path: '/settings'
+      fullPath: '/dashboard/settings'
+      preLoaderRoute: typeof AuthenticatedDashboardSettingsRouteImport
+      parentRoute: typeof AuthenticatedDashboardRoute
+    }
+    '/_authenticated/dashboard/resumes': {
+      id: '/_authenticated/dashboard/resumes'
+      path: '/resumes'
+      fullPath: '/dashboard/resumes'
+      preLoaderRoute: typeof AuthenticatedDashboardResumesRouteImport
+      parentRoute: typeof AuthenticatedDashboardRoute
+    }
     '/_authenticated/dashboard/jobs': {
       id: '/_authenticated/dashboard/jobs'
       path: '/jobs'
@@ -250,6 +290,8 @@ interface AuthenticatedDashboardRouteChildren {
   AuthenticatedDashboardAgentRoute: typeof AuthenticatedDashboardAgentRoute
   AuthenticatedDashboardCvBuilderRoute: typeof AuthenticatedDashboardCvBuilderRoute
   AuthenticatedDashboardJobsRoute: typeof AuthenticatedDashboardJobsRoute
+  AuthenticatedDashboardResumesRoute: typeof AuthenticatedDashboardResumesRoute
+  AuthenticatedDashboardSettingsRoute: typeof AuthenticatedDashboardSettingsRoute
   AuthenticatedDashboardTailorRoute: typeof AuthenticatedDashboardTailorRoute
   AuthenticatedDashboardIndexRoute: typeof AuthenticatedDashboardIndexRoute
 }
@@ -259,6 +301,8 @@ const AuthenticatedDashboardRouteChildren: AuthenticatedDashboardRouteChildren =
     AuthenticatedDashboardAgentRoute: AuthenticatedDashboardAgentRoute,
     AuthenticatedDashboardCvBuilderRoute: AuthenticatedDashboardCvBuilderRoute,
     AuthenticatedDashboardJobsRoute: AuthenticatedDashboardJobsRoute,
+    AuthenticatedDashboardResumesRoute: AuthenticatedDashboardResumesRoute,
+    AuthenticatedDashboardSettingsRoute: AuthenticatedDashboardSettingsRoute,
     AuthenticatedDashboardTailorRoute: AuthenticatedDashboardTailorRoute,
     AuthenticatedDashboardIndexRoute: AuthenticatedDashboardIndexRoute,
   }
