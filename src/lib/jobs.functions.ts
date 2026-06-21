@@ -151,13 +151,17 @@ export const fetchJobs = createServerFn({ method: "POST" })
       salary_range: j.salary_range,
       location: j.location,
       source: j.source,
-      search_query: query, // ← store the query that found this job
+      search_query: query,
     }));
 
-    const { error } = await context.supabase.from("scraped_jobs").insert(rows);
+    // ── UPSERT: skip duplicates instead of failing the whole batch ──
+    const { data: upserted, error } = await context.supabase
+      .from("scraped_jobs")
+      .upsert(rows, { onConflict: "url", ignoreDuplicates: true })
+      .select("id");
 
     if (error) {
-      console.error("[fetchJobs] DB insert error:", error.message);
+      console.error("[fetchJobs] DB upsert error:", error.message);
       return {
         inserted: 0,
         message: `Fetched ${jobs.length} jobs but failed to save: ${error.message}`,
@@ -165,11 +169,19 @@ export const fetchJobs = createServerFn({ method: "POST" })
       };
     }
 
+    const savedCount = upserted?.length ?? 0;
+    const skippedCount = rows.length - savedCount;
+
     return {
-      inserted: rows.length,
-      message: usedCvFallback
-        ? `Found ${rows.length} jobs based on your CV profile ("${query}").`
-        : `Found and saved ${rows.length} jobs for "${query}".`,
+      inserted: savedCount,
+      message:
+        savedCount === 0
+          ? `Found ${rows.length} job${rows.length === 1 ? "" : "s"} for "${query}", but all of them were already in the feed.`
+          : skippedCount > 0
+            ? `Added ${savedCount} new job${savedCount === 1 ? "" : "s"} for "${query}" (${skippedCount} were already in the feed).`
+            : usedCvFallback
+              ? `Found ${savedCount} jobs based on your CV profile ("${query}").`
+              : `Found and saved ${savedCount} jobs for "${query}".`,
       used_cv_fallback: usedCvFallback,
     };
   });
@@ -236,7 +248,7 @@ export const scrapeJob = createServerFn({ method: "POST" })
         company,
         job_description: jobDescription,
         source: "manual",
-        search_query: null, // manual entries have no search query
+        search_query: null,
       })
       .select("id, job_title, company, url")
       .single();
