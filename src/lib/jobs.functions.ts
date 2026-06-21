@@ -14,7 +14,7 @@ type NormalizedJob = {
   source: string;
 };
 
-// ─── SerpAPI (Google Jobs) — primary multi-source aggregator ──────────────
+// ─── SerpAPI (Google Jobs) ────────────────────────────────────────────────
 async function searchSerpApiJobs(
   query: string,
   locationType: LocationType,
@@ -152,9 +152,9 @@ export const fetchJobs = createServerFn({ method: "POST" })
       location: j.location,
       source: j.source,
       search_query: query,
+      searched_by_user_id: context.userId,   // ← NEW
     }));
 
-    // ── UPSERT: skip duplicates instead of failing the whole batch ──
     const { data: upserted, error } = await context.supabase
       .from("scraped_jobs")
       .upsert(rows, { onConflict: "url", ignoreDuplicates: true })
@@ -331,7 +331,6 @@ export const autoApply = createServerFn({ method: "POST" })
       };
     }
 
-    // Supported ATS: simulate field-mapping sequence
     await new Promise((resolve) => setTimeout(resolve, 2000));
 
     const { data: existing } = await context.supabase
