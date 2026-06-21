@@ -137,17 +137,14 @@ export const fetchJobs = createServerFn({ method: "POST" })
       usedCvFallback = true;
     }
 
-    // PRIMARY: Try SerpAPI first (Google Jobs engine)
-    let serpApiJobs = await searchSerpApiJobs(query, locationType);
-    
-    // FALLBACK: If SerpAPI returns no results, try Jobicy
-    let jobicyJobs: NormalizedJob[] = [];
-    if (serpApiJobs.length === 0) {
-      console.log("[fetchJobs] SerpAPI returned no results, trying Jobicy fallback...");
-      jobicyJobs = await searchJobicyFallback(query);
-    }
+    // Fetch from BOTH sources in parallel for maximum coverage
+    // SerpAPI results will be prioritized (placed first in results)
+    const [serpApiJobs, jobicyJobs] = await Promise.all([
+      searchSerpApiJobs(query, locationType),
+      searchJobicyFallback(query),
+    ]);
 
-    // Combine results: SerpAPI first, then any new Jobicy results
+    // Combine results: SerpAPI first, then add unique Jobicy results
     let jobs: NormalizedJob[] = [...serpApiJobs];
     
     // Add Jobicy results only if they add new unique jobs
@@ -170,16 +167,23 @@ export const fetchJobs = createServerFn({ method: "POST" })
       if (profile) {
         const fallbackQuery = [profile.primary_title, ...profile.keywords.slice(0, 2)].join(" ");
         
-        // Try SerpAPI with fallback query first
-        serpApiJobs = await searchSerpApiJobs(fallbackQuery, locationType);
+        const [fallbackSerpJobs, fallbackJobicyJobs] = await Promise.all([
+          searchSerpApiJobs(fallbackQuery, locationType),
+          searchJobicyFallback(fallbackQuery),
+        ]);
         
-        // Try Jobicy if SerpAPI still returns nothing
-        if (serpApiJobs.length === 0) {
-          jobicyJobs = await searchJobicyFallback(fallbackQuery);
+        jobs = [...fallbackSerpJobs];
+        const fbUrls = new Set(fallbackSerpJobs.map(j => j.url?.toLowerCase()));
+        const fbKeys = new Set(fallbackSerpJobs.map(j => `${j.job_title}|${j.company}`.toLowerCase()));
+        
+        for (const job of fallbackJobicyJobs) {
+          const urlKey = job.url?.toLowerCase();
+          const key = `${job.job_title}|${job.company}`.toLowerCase();
+          if ((urlKey && !fbUrls.has(urlKey)) || !fbKeys.has(key)) {
+            jobs.push(job);
+          }
         }
         
-        jobs = [...serpApiJobs, ...jobicyJobs];
-        jobs = deduplicateJobs(jobs);
         usedCvFallback = jobs.length > 0;
       }
     }
