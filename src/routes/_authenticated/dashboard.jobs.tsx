@@ -46,7 +46,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { scrapeJob, autoApply, fetchJobs } from "@/lib/jobs.functions";
-import { matchJobsToCV } from "@/lib/match.functions"; // NEW
+import { matchJobsToCV } from "@/lib/match.functions";
 
 // ─── Server functions ──────────────────────────────────────────────────────────
 
@@ -55,7 +55,21 @@ const listScrapedJobs = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const { data, error } = await context.supabase
       .from("scraped_jobs")
-      .select("id, job_title, company, url, salary_range, location, created_at, search_query") // added search_query
+      .select("id, job_title, company, url, salary_range, location, created_at, search_query")
+      .order("created_at", { ascending: false })
+      .limit(50);
+    if (error) throw new Error(error.message);
+    return (data ?? []) as unknown as ScrapedJob[];
+  });
+
+// ─── NEW: private "Your Search" feed ──────────────────────────────────────
+const listMyScannedJobs = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { data, error } = await context.supabase
+      .from("scraped_jobs")
+      .select("id, job_title, company, url, salary_range, location, created_at, search_query")
+      .eq("searched_by_user_id", context.userId)
       .order("created_at", { ascending: false })
       .limit(50);
     if (error) throw new Error(error.message);
@@ -131,6 +145,10 @@ const jobsQO = queryOptions({
   queryKey: ["scraped-jobs"],
   queryFn: () => listScrapedJobs(),
 });
+const myJobsQO = queryOptions({
+  queryKey: ["my-scanned-jobs"],
+  queryFn: () => listMyScannedJobs(),
+});
 const matchesQO = queryOptions({
   queryKey: ["job-matches"],
   queryFn: () => listJobMatches(),
@@ -147,6 +165,7 @@ const prefsQO = queryOptions({
 export const Route = createFileRoute("/_authenticated/dashboard/jobs")({
   loader: ({ context }) => {
     context.queryClient.ensureQueryData(jobsQO);
+    context.queryClient.ensureQueryData(myJobsQO);
     context.queryClient.ensureQueryData(matchesQO);
     context.queryClient.ensureQueryData(cvsQO);
     context.queryClient.ensureQueryData(prefsQO);
@@ -169,7 +188,7 @@ type ScrapedJob = {
   salary_range: string | null;
   location: string | null;
   created_at: string;
-  search_query: string | null; // NEW
+  search_query: string | null;
 };
 
 type JobMatch = {
@@ -312,7 +331,7 @@ function ScanJobsPanel({ onSuccess }: { onSuccess: () => void }) {
   );
 }
 
-// ─── MatchPanel (NEW) ──────────────────────────────────────────────────────
+// ─── MatchPanel ──────────────────────────────────────────────────────────────
 
 function MatchPanel({
   cvs,
@@ -554,6 +573,7 @@ function AutoApplyButton({
 function Jobs() {
   const queryClient = useQueryClient();
   const { data: jobs } = useSuspenseQuery(jobsQO);
+  const { data: myJobs } = useSuspenseQuery(myJobsQO);
   const { data: matches } = useSuspenseQuery(matchesQO);
   const { data: cvs } = useSuspenseQuery(cvsQO);
   const { data: prefs } = useSuspenseQuery(prefsQO);
@@ -580,7 +600,7 @@ function Jobs() {
 
   const handleScanSuccess = useCallback(async () => {
     queryClient.invalidateQueries({ queryKey: ["scraped-jobs"] });
-    // Auto-match against the user's most recently updated CV, if any.
+    queryClient.invalidateQueries({ queryKey: ["my-scanned-jobs"] });
     const defaultCvId = (cvs as CVOption[])[0]?.id;
     if (defaultCvId) {
       try {
@@ -622,7 +642,7 @@ function Jobs() {
         {/* Primary action: Scan Jobs for Me */}
         <ScanJobsPanel onSuccess={handleScanSuccess} />
 
-        {/* NEW: MatchPanel */}
+        {/* MatchPanel */}
         <MatchPanel cvs={cvs as CVOption[]} onSuccess={handleMatchSuccess} />
 
         {/* Secondary, low-emphasis manual option */}
@@ -662,9 +682,17 @@ function Jobs() {
           </div>
         </Card>
 
-        {/* Tabs */}
-        <Tabs defaultValue="matches">
+        {/* ─── Tabs ────────────────────────────────────────────────────── */}
+        <Tabs defaultValue="mine">
           <TabsList>
+            <TabsTrigger value="mine">
+              <Search className="mr-2 h-3.5 w-3.5" /> Your Search
+              {(myJobs as ScrapedJob[]).length > 0 && (
+                <Badge className="ml-2 bg-primary/20 text-primary border-0 text-[10px]">
+                  {(myJobs as ScrapedJob[]).length}
+                </Badge>
+              )}
+            </TabsTrigger>
             <TabsTrigger value="matches">
               <TrendingUp className="mr-2 h-3.5 w-3.5" /> My Matches
               {(matches as JobMatch[]).length > 0 && (
@@ -674,11 +702,73 @@ function Jobs() {
               )}
             </TabsTrigger>
             <TabsTrigger value="all">
-              <Search className="mr-2 h-3.5 w-3.5" /> Discover {/* relabeled */}
+              <Search className="mr-2 h-3.5 w-3.5" /> Discover
             </TabsTrigger>
           </TabsList>
 
-          {/* My Matches */}
+          {/* ── Your Search (private) ── */}
+          <TabsContent value="mine">
+            <Card className="glass overflow-hidden border-border">
+              {(myJobs as ScrapedJob[]).length === 0 ? (
+                <EmptyState
+                  icon={<Search className="h-8 w-8 text-muted-foreground" />}
+                  title="You haven't searched yet"
+                  desc="Click 'Scan Jobs for Me' above to run your first search."
+                />
+              ) : (
+                <div className="divide-y divide-border">
+                  <div className="grid grid-cols-[1fr_140px_120px_100px_40px] bg-card/40 px-5 py-2.5 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                    <div>Job Title</div>
+                    <div>Company</div>
+                    <div>Location</div>
+                    <div>Found</div>
+                    <div />
+                  </div>
+                  {(myJobs as ScrapedJob[]).map((j) => (
+                    <div
+                      key={j.id}
+                      className="grid grid-cols-[1fr_140px_120px_100px_40px] items-center gap-3 px-5 py-3.5 hover:bg-muted/20 transition-colors"
+                    >
+                      <div>
+                        <div className="text-sm font-medium">{j.job_title}</div>
+                        {j.salary_range && (
+                          <div className="text-xs text-[oklch(0.72_0.18_155)]">{j.salary_range}</div>
+                        )}
+                        {j.search_query && (
+                          <div className="text-[10px] text-muted-foreground/70">
+                            found via: "{j.search_query}"
+                          </div>
+                        )}
+                      </div>
+                      <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                        <Building2 className="h-3.5 w-3.5 shrink-0" />
+                        {j.company}
+                      </span>
+                      <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <MapPin className="h-3 w-3 shrink-0" />
+                        {j.location ?? "—"}
+                      </span>
+                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <Calendar className="h-3 w-3" />
+                        {relTime(j.created_at)}
+                      </span>
+                      {j.url ? (
+                        <a href={j.url} target="_blank" rel="noopener noreferrer">
+                          <Button variant="ghost" size="sm">
+                            <ExternalLink className="h-3.5 w-3.5" />
+                          </Button>
+                        </a>
+                      ) : (
+                        <div />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
+          </TabsContent>
+
+          {/* ── My Matches ── */}
           <TabsContent value="matches">
             <Card className="glass overflow-hidden border-border">
               {(matches as JobMatch[]).length === 0 ? (
@@ -757,7 +847,7 @@ function Jobs() {
             </Card>
           </TabsContent>
 
-          {/* All Jobs — now "Discover" */}
+          {/* ── Discover (shared feed) ── */}
           <TabsContent value="all">
             <div className="mb-2 text-xs text-muted-foreground">
               A shared feed of postings found across everyone's searches — not just yours. Some won't match your
