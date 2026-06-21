@@ -1,4 +1,4 @@
-// src/routes/_authenticated/dashboard.jobs.tsx
+// src/routes/_authenticated/dashboard.agent.tsx
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import {
   queryOptions,
@@ -29,37 +29,65 @@ import {
   ExternalLink,
   RefreshCw,
 } from "lucide-react";
-import { useState, useCallback } from "react";
-import { matchJobsToCV } from "@/lib/match.functions"; // NEW
+import { useState, useCallback, useEffect } from "react";
+import { matchJobsToCV } from "@/lib/match.functions";
+import { supabase } from "@/integrations/supabase/client";
 
-// ─── Queries ────────────────────────────────────────────────────────────────
+// ─── Types ─────────────────────────────────────────────────────────────────
 
 type CVOption = { id: string; title: string };
 
+type ScrapedJob = {
+  id: string;
+  job_title: string;
+  company: string;
+  job_description: string | null;
+  salary_range: string | null;
+  location: string | null;
+  url: string | null;
+  source: string | null;
+  created_at: string;
+};
+
+// ─── Queries ────────────────────────────────────────────────────────────────
+
 const cvsQO = queryOptions({
   queryKey: ["cvs", "list"],
-  queryFn: async () => {
-    // This query should already exist; we just reuse it.
-    // We'll assume the actual implementation is elsewhere; here we define a stub.
-    // In practice, this would be a server function that fetches user's CVs.
-    // For the patch, we assume it's already defined and returns CVOption[].
-    // We'll use a placeholder to avoid breaking the type.
-    return [] as CVOption[];
+  queryFn: async (): Promise<CVOption[]> => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return [];
+    const { data, error } = await supabase
+      .from("cvs")
+      .select("id, title")
+      .eq("user_id", user.id)
+      .order("updated_at", { ascending: false });
+    if (error) {
+      console.error("[cvsQO] Failed to fetch CVs:", error.message);
+      return [];
+    }
+    return (data ?? []).map((c) => ({ id: c.id, title: c.title }));
   },
 });
 
-// Assume scraped jobs query exists
 const scrapedJobsQO = queryOptions({
   queryKey: ["scraped-jobs"],
-  queryFn: async () => {
-    // Stub: returns jobs with id, job_title, company, location, salary, url, created_at
-    return [] as any[];
+  queryFn: async (): Promise<ScrapedJob[]> => {
+    const { data, error } = await supabase
+      .from("scraped_jobs")
+      .select("id, job_title, company, job_description, salary_range, location, url, source, created_at")
+      .order("created_at", { ascending: false })
+      .limit(100);
+    if (error) {
+      console.error("[scrapedJobsQO] Failed to fetch jobs:", error.message);
+      return [];
+    }
+    return data ?? [];
   },
 });
 
 // ─── Route ────────────────────────────────────────────────────────────────
 
-export const Route = createFileRoute("/_authenticated/dashboard/jobs")({
+export const Route = createFileRoute("/_authenticated/dashboard/agent")({
   loader: ({ context }) => {
     context.queryClient.ensureQueryData(cvsQO);
     context.queryClient.ensureQueryData(scrapedJobsQO);
@@ -71,20 +99,23 @@ export const Route = createFileRoute("/_authenticated/dashboard/jobs")({
 
 function ScanJobsPanel({ onSuccess }: { onSuccess: () => void }) {
   const [scanning, setScanning] = useState(false);
-  // Assume scan function exists
+  const scanJobsFn = useServerFn(async ({ data }: { data: { target_role?: string; location_type?: string } }) => {
+    const { fetchJobs } = await import("@/lib/jobs.functions");
+    return fetchJobs({ data: { target_role: data.target_role, location_type: data.location_type as any } });
+  });
+
   const handleScan = useCallback(async () => {
     setScanning(true);
     try {
-      // Simulate scan
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-      toast.success("Scan completed!");
+      const result = await scanJobsFn({ data: {} });
+      toast.success(result.message || "Scan completed!");
       onSuccess();
     } catch (e: any) {
       toast.error(e.message || "Scan failed.");
     } finally {
       setScanning(false);
     }
-  }, [onSuccess]);
+  }, [onSuccess, scanJobsFn]);
 
   return (
     <Card className="glass border-border p-5">
@@ -215,15 +246,15 @@ function Jobs() {
   const router = useRouter();
   const queryClient = useQueryClient();
 
-  // Load CVs and jobs
+  // Load CVs and jobs from Supabase (persisted state)
   const { data: cvs } = useSuspenseQuery(cvsQO);
   const { data: jobs } = useSuspenseQuery(scrapedJobsQO);
 
   const matchFn = useServerFn(matchJobsToCV);
 
-  // Handle scan success: auto-match against the most recent CV
+  // Handle scan success: invalidate jobs query and auto-match against the most recent CV
   const handleScanSuccess = useCallback(async () => {
-    queryClient.invalidateQueries({ queryKey: ["scraped-jobs"] });
+    await queryClient.invalidateQueries({ queryKey: ["scraped-jobs"] });
     const defaultCvId = (cvs as CVOption[])[0]?.id;
     if (defaultCvId) {
       try {
@@ -254,13 +285,13 @@ function Jobs() {
       {/* Match panel */}
       <MatchPanel cvs={cvs as CVOption[]} onSuccess={handleMatchSuccess} />
 
-      {/* Job list (existing) */}
+      {/* Job list (persisted from Supabase) */}
       <Card className="glass border-border p-0">
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <div>
             <h2 className="text-sm font-semibold">Scanned Jobs</h2>
             <p className="text-xs text-muted-foreground">
-              All jobs found by the scanner.
+              All jobs found by the scanner (persisted in database).
             </p>
           </div>
           <Badge variant="outline">{jobs.length} jobs</Badge>
@@ -271,7 +302,7 @@ function Jobs() {
           </div>
         ) : (
           <ul className="divide-y divide-border">
-            {jobs.map((j: any) => (
+            {jobs.map((j: ScrapedJob) => (
               <li
                 key={j.id}
                 className="flex flex-col gap-3 p-4 transition hover:bg-card/40 md:flex-row md:items-center md:justify-between"
@@ -280,7 +311,7 @@ function Jobs() {
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="truncate font-medium">{j.job_title}</span>
                     <Badge variant="outline" className="text-[10px] font-normal">
-                      New
+                      {j.source ?? "New"}
                     </Badge>
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
@@ -294,10 +325,10 @@ function Jobs() {
                         {j.location}
                       </span>
                     )}
-                    {j.salary && (
+                    {j.salary_range && (
                       <span className="inline-flex items-center gap-1">
                         <DollarSign className="h-3 w-3" />
-                        {j.salary}
+                        {j.salary_range}
                       </span>
                     )}
                     <span className="inline-flex items-center gap-1">

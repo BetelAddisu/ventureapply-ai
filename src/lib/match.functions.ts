@@ -1,12 +1,13 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { callAIText, AIError } from "@/lib/ai.router";
 
 // ─── Match Jobs to CV ───────────────────────────────────────────────────────
 // Scores every scraped_jobs row that doesn't yet have a job_matches row for
-// (this user, this job) against the chosen CV, using Gemini. Writes results
-// into job_matches. Designed to be called both automatically after a scan
-// and manually via a "Find My Matches" button — either way it only scores
-// jobs it hasn't scored yet for this user, so re-running is cheap.
+// (this user, this job) against the chosen CV, using AI with fallback routing. 
+// Writes results into job_matches. Designed to be called both automatically 
+// after a scan and manually via a "Find My Matches" button — either way it only 
+// scores jobs it hasn't scored yet for this user, so re-running is cheap.
 
 type CV = {
   profile: { name: string; title: string; email: string; phone: string; summary: string };
@@ -18,48 +19,15 @@ type CV = {
 type MatchResult = { match_score: number; tailor_suggestions: string };
 
 const MAX_JOBS_PER_RUN = 25; // keeps a single call bounded and fast
-const CONCURRENCY = 4; // small concurrency cap so we don't hammer Gemini serially or all-at-once
+const CONCURRENCY = 4; // small concurrency cap so we don't hammer AI serially or all-at-once
 
-// Thrown specifically on a 429 so callers can distinguish "quota hit, stop
+// Thrown specifically on quota exceeded so callers can distinguish "quota hit, stop
 // the batch gracefully" from "this one job failed to parse, skip it."
 class QuotaExceededError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "QuotaExceededError";
   }
-}
-
-async function callGemini(prompt: string, systemInstruction: string): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error("GEMINI_API_KEY is not configured on the server.");
-
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: systemInstruction }] },
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 300 },
-      }),
-    },
-  );
-
-  if (res.status === 429) {
-    const err = await res.text();
-    throw new QuotaExceededError(`Gemini quota exceeded: ${err}`);
-  }
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Gemini API error: ${err}`);
-  }
-
-  const json = await res.json();
-  const text: string = json?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-  if (!text) throw new Error("Gemini returned an empty response.");
-  return text;
 }
 
 function cvToText(cv: CV): string {
@@ -82,15 +50,19 @@ Score based on overlap in skills, seniority, and domain. Be realistic — most C
 
   const prompt = `JOB TITLE: ${jobTitle}\n\nJOB DESCRIPTION:\n${jobDescription.slice(0, 4000)}\n\nCANDIDATE CV:\n${cvText}`;
 
-  const raw = await callGemini(prompt, systemInstruction);
-  const clean = raw.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
-
   try {
+    const raw = await callAIText(prompt, systemInstruction, { temperature: 0.2, maxOutputTokens: 300 });
+    const clean = raw.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
+
     const parsed = JSON.parse(clean) as MatchResult;
     const score = Math.max(0, Math.min(100, Math.round(parsed.match_score)));
     return { match_score: score, tailor_suggestions: parsed.tailor_suggestions ?? "" };
-  } catch {
-    // If Gemini returns something unparsable for one job, don't fail the whole
+  } catch (e) {
+    // Check if it's an AIError with quota exceeded
+    if (e instanceof AIError && e.providersTried.includes("Gemini") && e.message.includes("429")) {
+      throw new QuotaExceededError(e.message);
+    }
+    // If AI returns something unparsable for one job, don't fail the whole
     // batch — just skip this job with a neutral score.
     return { match_score: 0, tailor_suggestions: "" };
   }
@@ -188,7 +160,7 @@ export const matchJobsToCV = createServerFn({ method: "POST" })
         return {
           scored: 0,
           message:
-            "Today's free AI quota is used up, so no jobs could be scored. Try again after midnight Pacific time, when Gemini's free tier resets.",
+            "Today's AI quota is used up, so no jobs could be scored. Try again when the quota resets.",
         };
       }
       return { scored: 0, message: "No new jobs to match — you're all caught up." };
@@ -210,7 +182,7 @@ export const matchJobsToCV = createServerFn({ method: "POST" })
     if (quotaHit) {
       return {
         scored: rows.length,
-        message: `Scored ${rows.length} job${rows.length === 1 ? "" : "s"} before today's free AI quota ran out. The rest will be scored once the quota resets (after midnight Pacific time) — just click "Find My Matches" again then.`,
+        message: `Scored ${rows.length} job${rows.length === 1 ? "" : "s"} before today's AI quota ran out. The rest will be scored when the quota resets — just click "Find My Matches" again then.`,
       };
     }
 
