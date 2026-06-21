@@ -329,7 +329,7 @@ function AgentRunner() {
     try {
       const result = await runFn({
         data: {
-          job_id: crypto.randomUUID(),
+          job_id: null,
           job_title: jobTitle.trim(),
           company: company.trim(),
           url: jobUrl.trim(),
