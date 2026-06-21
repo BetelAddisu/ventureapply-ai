@@ -20,6 +20,15 @@ type MatchResult = { match_score: number; tailor_suggestions: string };
 const MAX_JOBS_PER_RUN = 25; // keeps a single call bounded and fast
 const CONCURRENCY = 4; // small concurrency cap so we don't hammer Gemini serially or all-at-once
 
+// Thrown specifically on a 429 so callers can distinguish "quota hit, stop
+// the batch gracefully" from "this one job failed to parse, skip it."
+class QuotaExceededError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "QuotaExceededError";
+  }
+}
+
 async function callGemini(prompt: string, systemInstruction: string): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEY is not configured on the server.");
@@ -36,6 +45,11 @@ async function callGemini(prompt: string, systemInstruction: string): Promise<st
       }),
     },
   );
+
+  if (res.status === 429) {
+    const err = await res.text();
+    throw new QuotaExceededError(`Gemini quota exceeded: ${err}`);
+  }
 
   if (!res.ok) {
     const err = await res.text();
@@ -86,19 +100,32 @@ async function runWithConcurrency<T, R>(
   items: T[],
   limit: number,
   worker: (item: T) => Promise<R>,
-): Promise<R[]> {
-  const results: R[] = new Array(items.length);
+): Promise<{ results: (R | null)[]; quotaHit: boolean }> {
+  const results: (R | null)[] = new Array(items.length).fill(null);
   let next = 0;
+  let quotaHit = false;
 
   async function runNext(): Promise<void> {
+    if (quotaHit) return;
     const i = next++;
     if (i >= items.length) return;
-    results[i] = await worker(items[i]);
+    try {
+      results[i] = await worker(items[i]);
+    } catch (e) {
+      if (e instanceof QuotaExceededError) {
+        quotaHit = true;
+        return;
+      }
+      // Non-quota failures (bad JSON from one job, etc.) already resolve to
+      // a neutral score inside scoreOneJob, so this branch shouldn't
+      // normally trigger — but don't let one unexpected throw kill the batch.
+      results[i] = null;
+    }
     return runNext();
   }
 
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, runNext));
-  return results;
+  return { results, quotaHit };
 }
 
 export const matchJobsToCV = createServerFn({ method: "POST" })
@@ -144,23 +171,48 @@ export const matchJobsToCV = createServerFn({ method: "POST" })
       return { scored: 0, message: "No new jobs to match — you're all caught up." };
     }
 
-    // 3. Score each candidate job with bounded concurrency
-    const scores = await runWithConcurrency(candidates, CONCURRENCY, (job) =>
+    // 3. Score each candidate job with bounded concurrency, stopping early
+    // (gracefully) if the daily Gemini quota gets hit mid-batch.
+    const { results: scores, quotaHit } = await runWithConcurrency(candidates, CONCURRENCY, (job) =>
       scoreOneJob(cvText, job.job_title, job.job_description ?? ""),
     );
 
+    // Only keep jobs that actually got a score back (null = quota cut it
+    // off before it ran, or it failed for some other reason).
+    const scoredPairs = candidates
+      .map((job, i) => ({ job, score: scores[i] }))
+      .filter((p): p is { job: typeof candidates[number]; score: MatchResult } => p.score !== null);
+
+    if (scoredPairs.length === 0) {
+      if (quotaHit) {
+        return {
+          scored: 0,
+          message:
+            "Today's free AI quota is used up, so no jobs could be scored. Try again after midnight Pacific time, when Gemini's free tier resets.",
+        };
+      }
+      return { scored: 0, message: "No new jobs to match — you're all caught up." };
+    }
+
     // 4. Write results into job_matches
-    const rows = candidates.map((job, i) => ({
+    const rows = scoredPairs.map(({ job, score }) => ({
       user_id: context.userId,
       job_id: job.id,
       cv_id: data.cv_id,
-      match_score: scores[i].match_score,
-      tailor_suggestions: scores[i].tailor_suggestions,
+      match_score: score.match_score,
+      tailor_suggestions: score.tailor_suggestions,
       status: "matched",
     }));
 
     const { error: insertErr } = await context.supabase.from("job_matches").insert(rows);
     if (insertErr) throw new Error(`Saved scores but failed to write matches: ${insertErr.message}`);
+
+    if (quotaHit) {
+      return {
+        scored: rows.length,
+        message: `Scored ${rows.length} job${rows.length === 1 ? "" : "s"} before today's free AI quota ran out. The rest will be scored once the quota resets (after midnight Pacific time) — just click "Find My Matches" again then.`,
+      };
+    }
 
     return {
       scored: rows.length,
