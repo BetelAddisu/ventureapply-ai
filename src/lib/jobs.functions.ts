@@ -236,6 +236,7 @@ export const fetchJobs = createServerFn({ method: "POST" })
       searched_by_user_id: context.userId,
     }));
 
+    // First, upsert new jobs
     const { data: upserted, error } = await context.supabase
       .from("scraped_jobs")
       .upsert(rows, { onConflict: "url", ignoreDuplicates: true })
@@ -248,6 +249,19 @@ export const fetchJobs = createServerFn({ method: "POST" })
         message: `Fetched ${jobs.length} jobs but failed to save: ${error.message}`,
         used_cv_fallback: usedCvFallback,
       };
+    }
+
+    // IMPORTANT: Update searched_by_user_id for ALL jobs matching this query
+    // This ensures YOUR user is associated with jobs even if they already existed
+    const urls = rows.map(r => r.url).filter(Boolean);
+    if (urls.length > 0) {
+      await context.supabase
+        .from("scraped_jobs")
+        .update({
+          search_query: query,
+          searched_by_user_id: context.userId,
+        })
+        .in("url", urls);
     }
 
     const savedCount = upserted?.length ?? 0;
