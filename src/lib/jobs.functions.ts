@@ -254,36 +254,41 @@ export const fetchJobs = createServerFn({ method: "POST" })
     // IMPORTANT: Update searched_by_user_id for ALL jobs matching this query
     // This ensures YOUR user is associated with jobs even if they already existed
     const urls = rows.map(r => r.url).filter((u): u is string => Boolean(u));
-    console.log(`[fetchJobs] User ${context.userId} searching "${query}" - ${urls.length} URLs to associate`);
+    console.log(`[fetchJobs] User ${context.userId} searching "${query}" - ${urls.length} URLs to process`);
+    
+    // Make the update MORE explicit - update search_query AND searched_by_user_id
+    // This runs regardless of whether upserted is empty (jobs might already exist)
     if (urls.length > 0) {
-      const { error: updateError } = await context.supabase
+      // First update ALL matching URLs with this user's search
+      const { error: updateError, count } = await context.supabase
         .from("scraped_jobs")
         .update({
           search_query: query,
           searched_by_user_id: context.userId,
         })
         .in("url", urls);
+      
       if (updateError) {
-        console.error("[fetchJobs] Failed to update user associations:", updateError.message);
+        console.error("[fetchJobs] RLS/Update error:", updateError.message);
+        console.error("[fetchJobs] Full error details:", JSON.stringify(updateError));
       } else {
-        console.log(`[fetchJobs] Successfully associated ${urls.length} jobs with user ${context.userId}`);
+        console.log(`[fetchJobs] Updated ${count ?? '?'} rows for user ${context.userId}`);
       }
     }
 
     const savedCount = upserted?.length ?? 0;
+    const totalProcessed = urls.length; // Total jobs processed (upserted + updated)
     const skippedCount = rows.length - savedCount;
 
     return {
-      inserted: savedCount,
+      inserted: totalProcessed, // Return total processed, not just upserted
       total_found: rows.length,
       message:
-        savedCount === 0
-          ? `Found ${rows.length} job${rows.length === 1 ? "" : "s"} for "${query}" — refreshing your feed now.`
-          : skippedCount > 0
+        totalProcessed > 0
+          ? savedCount > 0
             ? `Added ${savedCount} new job${savedCount === 1 ? "" : "s"} for "${query}".`
-            : usedCvFallback
-              ? `Found ${savedCount} jobs based on your CV profile ("${query}").`
-              : `Found and saved ${savedCount} jobs for "${query}".`,
+            : `Found ${totalProcessed} job${totalProcessed === 1 ? "" : "s"} for "${query}" — already in feed.`
+          : `Found ${rows.length} job${rows.length === 1 ? "" : "s"} for "${query}" — refreshing your feed now.`,
       used_cv_fallback: usedCvFallback,
     };
   });
