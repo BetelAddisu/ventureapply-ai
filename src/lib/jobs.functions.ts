@@ -126,15 +126,40 @@ export const fetchJobs = createServerFn({ method: "POST" })
     let query = data.target_role?.trim() ?? "";
     let usedCvFallback = false;
 
+    // If no keyword provided, try to extract from CV (requires AI)
+    // If AI fails, use a generic fallback search instead of throwing error
     if (!query) {
-      const profile = await extractSearchProfileFromCV();
-      if (!profile) {
-        throw new Error(
-          "Enter a target role, or save a CV in the CV Builder so we can search for you automatically.",
-        );
+      try {
+        const profile = await extractSearchProfileFromCV();
+        if (profile) {
+          query = [profile.primary_title, ...profile.keywords.slice(0, 2)].join(" ");
+          usedCvFallback = true;
+        }
+      } catch (e) {
+        // AI extraction failed (no API keys or rate limited)
+        // Use generic job keywords as fallback instead of throwing error
+        console.warn("[fetchJobs] AI profile extraction failed, using generic search:", e);
       }
-      query = [profile.primary_title, ...profile.keywords.slice(0, 2)].join(" ");
-      usedCvFallback = true;
+    }
+
+    // If still no query (no keyword AND AI failed), use generic search
+    if (!query) {
+      // Try to get the user's CV title as a fallback query
+      const { data: cvRow } = await context.supabase
+        .from("cvs")
+        .select("raw_json_data")
+        .eq("user_id", context.userId)
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (cvRow?.raw_json_data?.profile?.title) {
+        query = cvRow.raw_json_data.profile.title;
+      } else {
+        // Ultimate fallback: generic software engineering jobs
+        query = "software engineer developer";
+      }
+      console.log(`[fetchJobs] Using fallback query: "${query}"`);
     }
 
     // Fetch from BOTH sources in parallel for maximum coverage
@@ -163,28 +188,32 @@ export const fetchJobs = createServerFn({ method: "POST" })
 
     // If combined results are empty, try fallback query from CV
     if (jobs.length === 0 && !usedCvFallback) {
-      const profile = await extractSearchProfileFromCV();
-      if (profile) {
-        const fallbackQuery = [profile.primary_title, ...profile.keywords.slice(0, 2)].join(" ");
-        
-        const [fallbackSerpJobs, fallbackJobicyJobs] = await Promise.all([
-          searchSerpApiJobs(fallbackQuery, locationType),
-          searchJobicyFallback(fallbackQuery),
-        ]);
-        
-        jobs = [...fallbackSerpJobs];
-        const fbUrls = new Set(fallbackSerpJobs.map(j => j.url?.toLowerCase()));
-        const fbKeys = new Set(fallbackSerpJobs.map(j => `${j.job_title}|${j.company}`.toLowerCase()));
-        
-        for (const job of fallbackJobicyJobs) {
-          const urlKey = job.url?.toLowerCase();
-          const key = `${job.job_title}|${job.company}`.toLowerCase();
-          if ((urlKey && !fbUrls.has(urlKey)) || !fbKeys.has(key)) {
-            jobs.push(job);
+      try {
+        const profile = await extractSearchProfileFromCV();
+        if (profile) {
+          const fallbackQuery = [profile.primary_title, ...profile.keywords.slice(0, 2)].join(" ");
+
+          const [fallbackSerpJobs, fallbackJobicyJobs] = await Promise.all([
+            searchSerpApiJobs(fallbackQuery, locationType),
+            searchJobicyFallback(fallbackQuery),
+          ]);
+
+          jobs = [...fallbackSerpJobs];
+          const fbUrls = new Set(fallbackSerpJobs.map(j => j.url?.toLowerCase()));
+          const fbKeys = new Set(fallbackSerpJobs.map(j => `${j.job_title}|${j.company}`.toLowerCase()));
+
+          for (const job of fallbackJobicyJobs) {
+            const urlKey = job.url?.toLowerCase();
+            const key = `${job.job_title}|${job.company}`.toLowerCase();
+            if ((urlKey && !fbUrls.has(urlKey)) || !fbKeys.has(key)) {
+              jobs.push(job);
+            }
           }
+
+          usedCvFallback = jobs.length > 0;
         }
-        
-        usedCvFallback = jobs.length > 0;
+      } catch (e) {
+        console.warn("[fetchJobs] AI fallback extraction failed:", e);
       }
     }
 
@@ -192,8 +221,8 @@ export const fetchJobs = createServerFn({ method: "POST" })
       return {
         inserted: 0,
         message: usedCvFallback
-          ? "Searched using your CV profile, but no matching jobs were found right now. Try again later."
-          : "No jobs found for that role. Try a broader keyword, or leave it blank to search from your CV.",
+          ? "Searched using your CV profile, but no matching jobs were found right now. Try a broader keyword."
+          : "No jobs found for that role. Try a broader keyword like 'software engineer'.",
         used_cv_fallback: usedCvFallback,
       };
     }
