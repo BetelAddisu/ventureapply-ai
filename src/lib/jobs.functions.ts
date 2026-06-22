@@ -126,8 +126,10 @@ export const fetchJobs = createServerFn({ method: "POST" })
     let query = data.target_role?.trim() ?? "";
     let usedCvFallback = false;
 
-    // If no keyword provided, try AI to extract search terms from CV
+    // If user provided a keyword, use it directly (most specific)
+    // Do NOT override user's specific search with AI-generated query
     if (!query) {
+      // No keyword provided - use AI to extract from CV
       try {
         const profile = await extractSearchProfileFromCV();
         if (profile) {
@@ -137,23 +139,23 @@ export const fetchJobs = createServerFn({ method: "POST" })
       } catch (e) {
         console.warn("[fetchJobs] AI profile extraction failed:", e);
       }
-    }
 
-    // If still no query (AI failed), try to get CV title from database
-    if (!query) {
-      const { data: cvRow } = await context.supabase
-        .from("cvs")
-        .select("raw_json_data")
-        .eq("user_id", context.userId)
-        .order("updated_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      // If AI failed, try CV title from database
+      if (!query) {
+        const { data: cvRow } = await context.supabase
+          .from("cvs")
+          .select("raw_json_data")
+          .eq("user_id", context.userId)
+          .order("updated_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
 
-      if (cvRow?.raw_json_data?.profile?.title) {
-        query = cvRow.raw_json_data.profile.title;
-      } else {
-        // Ultimate fallback: generic software jobs
-        query = "software engineer developer";
+        if (cvRow?.raw_json_data?.profile?.title) {
+          query = cvRow.raw_json_data.profile.title;
+        } else {
+          // Ultimate fallback: generic software jobs
+          query = "software engineer developer";
+        }
       }
     }
 
