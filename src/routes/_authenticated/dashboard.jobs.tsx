@@ -599,8 +599,10 @@ function Jobs() {
   // Auto-matches against the user's most recently updated CV after a
   // successful scan, in addition to the manual "Find My Matches" button.
   const handleScanSuccess = async () => {
+    // Refresh all job-related queries
     queryClient.invalidateQueries({ queryKey: ["scraped-jobs"] });
     queryClient.invalidateQueries({ queryKey: ["my-scanned-jobs"] });
+    queryClient.invalidateQueries({ queryKey: ["search-history"] });
     const defaultCvId = (cvs as CVOption[])[0]?.id;
     if (defaultCvId) {
       try {
