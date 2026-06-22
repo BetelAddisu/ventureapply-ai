@@ -126,15 +126,35 @@ export const fetchJobs = createServerFn({ method: "POST" })
     let query = data.target_role?.trim() ?? "";
     let usedCvFallback = false;
 
+    // If no keyword provided, try AI to extract search terms from CV
     if (!query) {
-      const profile = await extractSearchProfileFromCV();
-      if (!profile) {
-        throw new Error(
-          "Enter a target role, or save a CV in the CV Builder so we can search for you automatically.",
-        );
+      try {
+        const profile = await extractSearchProfileFromCV();
+        if (profile) {
+          query = [profile.primary_title, ...profile.keywords.slice(0, 2)].join(" ");
+          usedCvFallback = true;
+        }
+      } catch (e) {
+        console.warn("[fetchJobs] AI profile extraction failed:", e);
       }
-      query = [profile.primary_title, ...profile.keywords.slice(0, 2)].join(" ");
-      usedCvFallback = true;
+    }
+
+    // If still no query (AI failed), try to get CV title from database
+    if (!query) {
+      const { data: cvRow } = await context.supabase
+        .from("cvs")
+        .select("raw_json_data")
+        .eq("user_id", context.userId)
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (cvRow?.raw_json_data?.profile?.title) {
+        query = cvRow.raw_json_data.profile.title;
+      } else {
+        // Ultimate fallback: generic software jobs
+        query = "software engineer developer";
+      }
     }
 
     // Fetch from BOTH sources in parallel for maximum coverage
@@ -146,11 +166,11 @@ export const fetchJobs = createServerFn({ method: "POST" })
 
     // Combine results: SerpAPI first, then add unique Jobicy results
     let jobs: NormalizedJob[] = [...serpApiJobs];
-    
+
     // Add Jobicy results only if they add new unique jobs
     const existingUrls = new Set(serpApiJobs.map(j => j.url?.toLowerCase()));
     const existingKeys = new Set(serpApiJobs.map(j => `${j.job_title}|${j.company}`.toLowerCase()));
-    
+
     for (const job of jobicyJobs) {
       const urlKey = job.url?.toLowerCase();
       const key = `${job.job_title}|${job.company}`.toLowerCase();
@@ -161,30 +181,34 @@ export const fetchJobs = createServerFn({ method: "POST" })
       }
     }
 
-    // If combined results are empty, try fallback query from CV
+    // If combined results are empty, try AI fallback
     if (jobs.length === 0 && !usedCvFallback) {
-      const profile = await extractSearchProfileFromCV();
-      if (profile) {
-        const fallbackQuery = [profile.primary_title, ...profile.keywords.slice(0, 2)].join(" ");
-        
-        const [fallbackSerpJobs, fallbackJobicyJobs] = await Promise.all([
-          searchSerpApiJobs(fallbackQuery, locationType),
-          searchJobicyFallback(fallbackQuery),
-        ]);
-        
-        jobs = [...fallbackSerpJobs];
-        const fbUrls = new Set(fallbackSerpJobs.map(j => j.url?.toLowerCase()));
-        const fbKeys = new Set(fallbackSerpJobs.map(j => `${j.job_title}|${j.company}`.toLowerCase()));
-        
-        for (const job of fallbackJobicyJobs) {
-          const urlKey = job.url?.toLowerCase();
-          const key = `${job.job_title}|${job.company}`.toLowerCase();
-          if ((urlKey && !fbUrls.has(urlKey)) || !fbKeys.has(key)) {
-            jobs.push(job);
+      try {
+        const profile = await extractSearchProfileFromCV();
+        if (profile) {
+          const fallbackQuery = [profile.primary_title, ...profile.keywords.slice(0, 2)].join(" ");
+
+          const [fallbackSerpJobs, fallbackJobicyJobs] = await Promise.all([
+            searchSerpApiJobs(fallbackQuery, locationType),
+            searchJobicyFallback(fallbackQuery),
+          ]);
+
+          jobs = [...fallbackSerpJobs];
+          const fbUrls = new Set(fallbackSerpJobs.map(j => j.url?.toLowerCase()));
+          const fbKeys = new Set(fallbackSerpJobs.map(j => `${j.job_title}|${j.company}`.toLowerCase()));
+
+          for (const job of fallbackJobicyJobs) {
+            const urlKey = job.url?.toLowerCase();
+            const key = `${job.job_title}|${job.company}`.toLowerCase();
+            if ((urlKey && !fbUrls.has(urlKey)) || !fbKeys.has(key)) {
+              jobs.push(job);
+            }
           }
+
+          usedCvFallback = jobs.length > 0;
         }
-        
-        usedCvFallback = jobs.length > 0;
+      } catch (e) {
+        console.warn("[fetchJobs] AI fallback extraction failed:", e);
       }
     }
 
@@ -192,8 +216,8 @@ export const fetchJobs = createServerFn({ method: "POST" })
       return {
         inserted: 0,
         message: usedCvFallback
-          ? "Searched using your CV profile, but no matching jobs were found right now. Try again later."
-          : "No jobs found for that role. Try a broader keyword, or leave it blank to search from your CV.",
+          ? "Searched using your CV profile, but no matching jobs were found. Try a broader keyword."
+          : "No jobs found for that role. Try a broader keyword like 'software engineer'.",
         used_cv_fallback: usedCvFallback,
       };
     }
