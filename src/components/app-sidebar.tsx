@@ -8,6 +8,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { TrialStatusBadge } from "@/components/trial-status-badge";
 import { toast } from "sonner";
+import { useCVCache } from "@/hooks/use-cv-cache";
 
 const items = [
   { title: "CV Builder", url: "/dashboard/cv-builder", icon: FileText, tier: "Free" },
@@ -22,10 +23,27 @@ export function AppSidebar() {
   const collapsed = state === "collapsed";
   const path = useRouterState({ select: (r) => r.location.pathname });
   const navigate = useNavigate();
+  const { hasUnsavedCache, clearCache, cachedTitle } = useCVCache();
 
   const signOut = async () => {
+    // Check for unsaved CV cache before signing out
+    if (hasUnsavedCache()) {
+      const confirmed = window.confirm(
+        `You have an unsaved CV "${cachedTitle}" in cache. Would you like to save it first?\n\nClick OK to save, or Cancel to discard.`
+      );
+      if (confirmed) {
+        // Navigate to CV builder to save first
+        navigate({ to: "/dashboard/cv-builder" });
+        toast.info("Go to CV Builder to save your CV");
+        return;
+      } else {
+        // Discard unsaved cache
+        clearCache();
+      }
+    }
+
     await supabase.auth.signOut();
-    toast.success("Signed out");
+    toast.success("Signed out successfully");
     navigate({ to: "/auth", replace: true });
   };
 
