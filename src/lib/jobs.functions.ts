@@ -254,6 +254,7 @@ export const fetchJobs = createServerFn({ method: "POST" })
     // IMPORTANT: Update searched_by_user_id for ALL jobs matching this query
     // This ensures YOUR user is associated with jobs even if they already existed
     const urls = rows.map(r => r.url).filter((u): u is string => Boolean(u));
+    console.log(`[fetchJobs] User ${context.userId} searching "${query}" - ${urls.length} URLs to associate`);
     if (urls.length > 0) {
       const { error: updateError } = await context.supabase
         .from("scraped_jobs")
@@ -264,6 +265,8 @@ export const fetchJobs = createServerFn({ method: "POST" })
         .in("url", urls);
       if (updateError) {
         console.error("[fetchJobs] Failed to update user associations:", updateError.message);
+      } else {
+        console.log(`[fetchJobs] Successfully associated ${urls.length} jobs with user ${context.userId}`);
       }
     }
 
