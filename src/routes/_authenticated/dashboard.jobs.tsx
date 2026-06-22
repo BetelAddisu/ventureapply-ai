@@ -45,7 +45,7 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { scrapeJob, autoApply, fetchJobs } from "@/lib/jobs.functions";
+import { scrapeJob, autoApply, fetchJobs, logUserSearch, getUserSearchHistory } from "@/lib/jobs.functions";
 import { matchJobsToCV } from "@/lib/match.functions";
 
 // ─── Server functions ──────────────────────────────────────────────────────────
@@ -161,6 +161,11 @@ const prefsQO = queryOptions({
   queryFn: () => getNotifPrefs(),
 });
 
+const searchHistoryQO = queryOptions({
+  queryKey: ["search-history"],
+  queryFn: () => getUserSearchHistory(),
+});
+
 export const Route = createFileRoute("/_authenticated/dashboard/jobs")({
   loader: ({ context }) => {
     context.queryClient.ensureQueryData(jobsQO);
@@ -168,6 +173,7 @@ export const Route = createFileRoute("/_authenticated/dashboard/jobs")({
     context.queryClient.ensureQueryData(matchesQO);
     context.queryClient.ensureQueryData(cvsQO);
     context.queryClient.ensureQueryData(prefsQO);
+    context.queryClient.ensureQueryData(searchHistoryQO);
   },
   errorComponent: ({ error }) => (
     <div className="p-8 text-center text-sm text-muted-foreground">
@@ -255,13 +261,19 @@ function ScanJobsPanel({ onSuccess }: { onSuccess: () => void }) {
   const [locationType, setLocationType] = useState<LocationType>("any");
   const [scanning, setScanning] = useState(false);
   const fetchJobsFn = useServerFn(fetchJobs);
+  const logSearchFn = useServerFn(logUserSearch);
 
   const handleScan = async () => {
     setScanning(true);
     try {
+      const searchKeyword = keyword.trim() || "CV-based search";
       const result = await fetchJobsFn({
         data: { target_role: keyword.trim() || undefined, location_type: locationType },
       });
+      // Log this search to history
+      await logSearchFn({
+        data: { keyword: searchKeyword, location_type: locationType, results_count: result.inserted ?? 0 },
+      }).catch(console.warn);
       // Always refresh the job list - show results regardless of new vs existing
       toast.success(result.message);
       onSuccess();
@@ -694,10 +706,10 @@ function Jobs() {
             </TabsTrigger>
           </TabsList>
 
-          {/* Your Search — private to this user */}
+          {/* Your Search — private to this user, grouped by keyword */}
           <TabsContent value="mine">
             <p className="mb-2 text-xs text-muted-foreground">
-              Jobs found by searches you've personally run. For the full shared pool, see "Discover."
+              Jobs found by searches you've personally run. Each search shows its results below.
             </p>
             <Card className="glass overflow-hidden border-border">
               {(myJobs as ScrapedJob[]).length === 0 ? (
@@ -708,45 +720,71 @@ function Jobs() {
                 />
               ) : (
                 <div className="divide-y divide-border">
-                  <div className="grid grid-cols-[1fr_140px_120px_100px_40px] bg-card/40 px-5 py-2.5 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                    <div>Job Title</div>
-                    <div>Company</div>
-                    <div>Location</div>
-                    <div>Found</div>
-                    <div />
-                  </div>
-                  {(myJobs as ScrapedJob[]).map((j) => (
-                    <div
-                      key={j.id}
-                      className="grid grid-cols-[1fr_140px_120px_100px_40px] items-center gap-3 px-5 py-3.5 hover:bg-muted/20 transition-colors"
-                    >
-                      <div>
-                        <div className="text-sm font-medium">{j.job_title}</div>
-                        {j.salary_range && (
-                          <div className="text-xs text-[oklch(0.72_0.18_155)]">{j.salary_range}</div>
-                        )}
+                  {/* Group jobs by search_query */}
+                  {Object.entries(
+                    (myJobs as ScrapedJob[]).reduce<Record<string, ScrapedJob[]>>((acc, job) => {
+                      const key = job.search_query ?? "Unknown";
+                      if (!acc[key]) acc[key] = [];
+                      acc[key].push(job);
+                      return acc;
+                    }, {})
+                  ).map(([searchKeyword, jobs]) => (
+                    <div key={searchKeyword}>
+                      {/* Search keyword header */}
+                      <div className="bg-card/60 px-5 py-2.5">
+                        <div className="flex items-center gap-2">
+                          <Search className="h-3.5 w-3.5 text-primary" />
+                          <span className="text-sm font-semibold">"{searchKeyword}"</span>
+                          <Badge variant="outline" className="text-[10px]">
+                            {jobs.length} job{jobs.length !== 1 ? "s" : ""}
+                          </Badge>
+                          <span className="ml-auto text-xs text-muted-foreground">
+                            Latest: {relTime(jobs[0]?.created_at ?? "")}
+                          </span>
+                        </div>
                       </div>
-                      <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                        <Building2 className="h-3.5 w-3.5 shrink-0" />
-                        {j.company}
-                      </span>
-                      <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <MapPin className="h-3 w-3 shrink-0" />
-                        {j.location ?? "—"}
-                      </span>
-                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                        <Calendar className="h-3 w-3" />
-                        {relTime(j.created_at)}
-                      </span>
-                      {j.url ? (
-                        <a href={j.url} target="_blank" rel="noopener noreferrer">
-                          <Button variant="ghost" size="sm">
-                            <ExternalLink className="h-3.5 w-3.5" />
-                          </Button>
-                        </a>
-                      ) : (
+                      {/* Jobs for this search */}
+                      <div className="grid grid-cols-[1fr_140px_120px_100px_40px] bg-card/40 px-5 py-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                        <div>Job Title</div>
+                        <div>Company</div>
+                        <div>Location</div>
+                        <div>Found</div>
                         <div />
-                      )}
+                      </div>
+                      {jobs.map((j) => (
+                        <div
+                          key={j.id}
+                          className="grid grid-cols-[1fr_140px_120px_100px_40px] items-center gap-3 px-5 py-3.5 hover:bg-muted/20 transition-colors"
+                        >
+                          <div>
+                            <div className="text-sm font-medium">{j.job_title}</div>
+                            {j.salary_range && (
+                              <div className="text-xs text-[oklch(0.72_0.18_155)]">{j.salary_range}</div>
+                            )}
+                          </div>
+                          <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                            <Building2 className="h-3.5 w-3.5 shrink-0" />
+                            {j.company}
+                          </span>
+                          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                            <MapPin className="h-3 w-3 shrink-0" />
+                            {j.location ?? "—"}
+                          </span>
+                          <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                            <Calendar className="h-3 w-3" />
+                            {relTime(j.created_at)}
+                          </span>
+                          {j.url ? (
+                            <a href={j.url} target="_blank" rel="noopener noreferrer">
+                              <Button variant="ghost" size="sm">
+                                <ExternalLink className="h-3.5 w-3.5" />
+                              </Button>
+                            </a>
+                          ) : (
+                            <div />
+                          )}
+                        </div>
+                      ))}
                     </div>
                   ))}
                 </div>
