@@ -326,10 +326,16 @@ function CVBuilder() {
       const imgY = 0;
 
       pdf.addImage(imgData, "PNG", imgX, imgY, imgWidth * ratio, imgHeight * ratio);
-      
+
+      // Add "Made by VentureApply" watermark footer
+      const footerY = pdfHeight - 8; // 8mm from bottom
+      pdf.setFontSize(8);
+      pdf.setTextColor(150, 150, 150); // Light gray
+      pdf.text("Made by VentureApply", pdfWidth / 2, footerY, { align: "center" });
+
       const filename = `${title.replace(/[^a-zA-Z0-9]/g, "_")}_CV.pdf`;
       pdf.save(filename);
-      
+
       toast.success("CV exported successfully!");
     } catch (err: any) {
       console.error("Export error:", err);
