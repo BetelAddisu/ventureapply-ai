@@ -65,13 +65,18 @@ const listScrapedJobs = createServerFn({ method: "GET" })
 const listMyScannedJobs = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
+    console.log(`[listMyScannedJobs] Fetching jobs for user ${context.userId}`);
     const { data, error } = await context.supabase
       .from("scraped_jobs")
       .select("id, job_title, company, url, salary_range, location, created_at, search_query, source, searched_by_user_id")
       .eq("searched_by_user_id", context.userId)
       .order("created_at", { ascending: false })
       .limit(50);
-    if (error) throw new Error(error.message);
+    if (error) {
+      console.error("[listMyScannedJobs] Error:", error.message);
+      throw new Error(error.message);
+    }
+    console.log(`[listMyScannedJobs] Found ${data?.length ?? 0} jobs for user ${context.userId}`);
     return (data ?? []) as unknown as ScrapedJob[];
   });
 
@@ -270,10 +275,16 @@ function ScanJobsPanel({ onSuccess }: { onSuccess: () => void }) {
       const result = await fetchJobsFn({
         data: { target_role: keyword.trim() || undefined, location_type: locationType },
       });
-      // Log this search to history
-      await logSearchFn({
+      // Log this search to history (show warning if it fails - helps debug missing table)
+      const logResult = await logSearchFn({
         data: { keyword: searchKeyword, location_type: locationType, results_count: result.inserted ?? 0 },
-      }).catch(console.warn);
+      }).catch((e) => {
+        console.warn("[ScanJobsPanel] Failed to log search history:", e.message);
+        return { error: e.message };
+      });
+      if (logResult && 'error' in logResult) {
+        toast.error("Search worked but history logging failed: " + logResult.error);
+      }
       // Always refresh the job list - show results regardless of new vs existing
       toast.success(result.message);
       onSuccess();
