@@ -476,3 +476,61 @@ export const autoApply = createServerFn({ method: "POST" })
       message: "Application submitted successfully via agent.",
     };
   });
+
+// ─── Search History ────────────────────────────────────────────────────────────
+
+export const logUserSearch = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: { keyword: string; location_type: string; results_count: number }) => d)
+  .handler(async ({ data, context }) => {
+    const { error } = await context.supabase
+      .from("search_history")
+      .insert({
+        user_id: context.userId,
+        keyword: data.keyword,
+        location_type: data.location_type,
+        results_count: data.results_count,
+      });
+
+    if (error) {
+      console.warn("[logUserSearch] Failed to log search:", error.message);
+      // Don't throw - this is non-critical
+    }
+  });
+
+export const getUserSearchHistory = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    // Get unique search keywords by user, with latest timestamp
+    const { data, error } = await context.supabase
+      .from("search_history")
+      .select("id, keyword, location_type, results_count, created_at")
+      .eq("user_id", context.userId)
+      .order("created_at", { ascending: false })
+      .limit(20);
+
+    if (error) throw new Error(error.message);
+
+    // Get jobs for each unique keyword
+    const uniqueKeywords = [...new Set((data ?? []).map(s => s.keyword))];
+    const jobsByKeyword: Record<string, any[]> = {};
+
+    for (const keyword of uniqueKeywords) {
+      const { data: jobs } = await context.supabase
+        .from("scraped_jobs")
+        .select("id, job_title, company, url, salary_range, location, created_at, search_query")
+        .eq("search_query", keyword)
+        .eq("searched_by_user_id", context.userId)
+        .order("created_at", { ascending: false })
+        .limit(20);
+
+      if (jobs && jobs.length > 0) {
+        jobsByKeyword[keyword] = jobs;
+      }
+    }
+
+    return {
+      searches: data ?? [],
+      jobsByKeyword,
+    };
+  });
